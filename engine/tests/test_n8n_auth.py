@@ -206,3 +206,138 @@ async def test_vendor_oauth_callback_stays_exempt(db):
     async with _client() as client:
         resp = await client.get("/egress/connections/oauth/callback")
     assert resp.status_code != 401
+
+
+# ---------------------------------------------------------------------------
+# Readiness: log -> enforce, once, never back
+# ---------------------------------------------------------------------------
+
+import json
+
+from laya.integrations import n8n_bootstrap as nb
+
+
+@pytest.fixture
+def workflows(monkeypatch, tmp_path):
+    """A bundled template set (one ingestion template + the error handler) and an empty version record."""
+    wf_dir = tmp_path / "workflows"
+    wf_dir.mkdir()
+    (wf_dir / "jira-ingestion.json").write_text(json.dumps(
+        {"name": "Laya - Jira Ingestion", "meta": {"laya_version": "2"}, "nodes": []}))
+    (wf_dir / nb._ERROR_HANDLER_FILENAME).write_text(json.dumps(
+        {"name": nb._ERROR_HANDLER_NAME, "meta": {"laya_version": "5"}, "nodes": []}))
+    versions_file = tmp_path / "workflow_versions.json"
+    monkeypatch.setattr(nb, "WORKFLOWS_DIR", wf_dir)
+    monkeypatch.setattr(nb, "_VERSIONS_FILE", versions_file)
+    return versions_file
+
+
+def _token_from(monkeypatch, source: str) -> None:
+    monkeypatch.setattr(keychain, "_n8n_token_source", source)
+
+
+async def _add_clone(db, error=None):
+    await db.execute(
+        "INSERT INTO sources (source_id, name, platform, workflow_id, space_id, source_type, "
+        "connection_id, workflow_update_error) VALUES ('src_1', 'Jira', 'jira', 'wf_1', 'default', "
+        "'ingestion', 'conn_1', ?)",
+        (error,),
+    )
+    await db.commit()
+
+
+def _write_versions(versions_file, *, template="2", handler="5", handler_id="eh_1"):
+    versions_file.write_text(json.dumps({
+        "Laya - Jira Ingestion": template,
+        nb._ERROR_HANDLER_NAME: handler,
+        nb._ERROR_HANDLER_ID_KEY: handler_id,
+    }))
+
+
+@pytest.mark.asyncio
+async def test_fresh_install_enforces_immediately(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "env")
+    result = await n8n_auth.evaluate_readiness()
+    assert result == {"mode": "enforce", "unmet": []}
+    assert n8n_auth.get_mode() == "enforce"
+    assert n8n_auth.status()["enforced_since"]
+
+
+@pytest.mark.asyncio
+async def test_token_not_from_launcher_blocks_enforcement(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "keychain")
+    result = await n8n_auth.evaluate_readiness()
+    assert result["mode"] == "log"
+    assert any("LAYA_N8N_TOKEN" in u for u in result["unmet"])
+
+
+@pytest.mark.asyncio
+async def test_stale_template_and_handler_block_until_pushed(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "env")
+    await _add_clone(db)
+    _write_versions(workflows, template="1", handler="4")
+    result = await n8n_auth.evaluate_readiness()
+    assert result["mode"] == "log"
+    assert any("Laya - Jira Ingestion" in u for u in result["unmet"])
+    assert any("error handler" in u for u in result["unmet"])
+
+    _write_versions(workflows)
+    result = await n8n_auth.evaluate_readiness()
+    assert result == {"mode": "enforce", "unmet": []}
+
+
+@pytest.mark.asyncio
+async def test_flagged_clone_blocks_enforcement(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "env")
+    await _add_clone(db, error="n8n rejected the update (HTTP 400)")
+    _write_versions(workflows)
+    result = await n8n_auth.evaluate_readiness()
+    assert result["mode"] == "log"
+    assert any("failed to update" in u for u in result["unmet"])
+
+
+@pytest.mark.asyncio
+async def test_enforcement_never_reverts(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "env")
+    _write_versions(workflows)
+    assert (await n8n_auth.evaluate_readiness())["mode"] == "enforce"
+    await _add_clone(db, error="Workflow no longer exists in n8n")
+    _token_from(monkeypatch, "keychain")
+    assert (await n8n_auth.evaluate_readiness()) == {"mode": "enforce", "unmet": []}
+    assert n8n_auth.get_mode() == "enforce"
+
+
+@pytest.mark.asyncio
+async def test_hatch_does_not_change_the_persisted_mode(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "env")
+    monkeypatch.setenv(n8n_auth.HATCH_ENV, "off")
+    assert (await n8n_auth.evaluate_readiness())["mode"] == "log"
+    import laya.config as config
+    assert config.load_settings()["n8n_auth"]["mode"] == "log"
+
+
+@pytest.mark.asyncio
+async def test_status_report_includes_readiness_and_flags(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "keychain")
+    await _add_clone(db, error="boom")
+    await nb._set_error_handler_update_error("handler boom")
+    report = await n8n_auth.status_report()
+    assert report["mode"] == "log"
+    assert report["token_source"] == "keychain"
+    assert report["flagged_clones"] == 1
+    assert report["error_handler_update_error"] == "handler boom"
+    assert report["unmet"]
+
+
+@pytest.mark.asyncio
+async def test_import_workflows_runs_the_readiness_check(db, workflows, monkeypatch):
+    from unittest.mock import AsyncMock
+    _token_from(monkeypatch, "env")
+    with patch.object(nb, "get_api_key", return_value="k"), \
+         patch.object(nb, "_ensure_error_handler_workflow", new=AsyncMock(return_value="eh_1")):
+        await nb.import_workflows("http://localhost:45678")
+    # No clones: the version record now exists, and the handler is not recorded
+    # at the bundled version because its deployment was mocked away.
+    result = await n8n_auth.evaluate_readiness()
+    assert result["mode"] == "log"
+    assert any("error handler" in u for u in result["unmet"])

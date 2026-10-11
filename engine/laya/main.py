@@ -261,8 +261,15 @@ async def lifespan(app: FastAPI):
     # Resolve the engine API token (launcher-supplied env var, else keychain)
     ensure_engine_token()
 
-    # Resolve the token the bundled n8n workflows present (same resolution)
+    # Resolve the token the bundled n8n workflows present (same resolution),
+    # then see whether it can be enforced already (fresh installs can; an
+    # upgraded install waits for the startup workflow sync to push the header).
     ensure_n8n_token()
+    try:
+        from laya.security.n8n_auth import evaluate_readiness
+        await evaluate_readiness()
+    except Exception as e:
+        log.warning("n8n_auth_readiness_check_failed", error=str(e))
 
     # Ensure an MCP bearer token exists when auth_mode=bearer so the SSE
     # endpoint is immediately usable. Token only generated if missing.

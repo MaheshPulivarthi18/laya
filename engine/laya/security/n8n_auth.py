@@ -20,6 +20,7 @@ the mode is never switched back automatically.
 from __future__ import annotations
 
 import hmac
+import json
 import os
 
 import structlog
@@ -118,3 +119,127 @@ def status() -> dict:
         "rejected_since_start": count,
         "last_rejected_at": last,
     }
+
+
+# ---------------------------------------------------------------------------
+# Readiness: when is it safe to enforce?
+# ---------------------------------------------------------------------------
+
+# Human-readable reasons enforcement is still off, shown on the Settings panel.
+_last_unmet: list[str] = []
+
+
+async def unmet_conditions() -> list[str]:
+    """Return what still blocks enforcement; empty means every workflow carries the token.
+
+    Conditions (all must hold):
+    - the engine's token came from the launcher environment, which is the
+      only case where n8n is known to hold the same value;
+    - the shared error handler is deployed at the bundled template version;
+    - every ingestion template that has at least one clone is recorded at its
+      bundled version, i.e. the header-sending version has been pushed;
+    - no clone is flagged with a failed update.
+
+    A fresh install (no clones and no version record) is ready as soon as the
+    token condition holds: there is nothing deployed that could lose events.
+    """
+    from laya.db.sqlite import get_db
+    from laya.integrations import n8n_bootstrap as nb
+
+    unmet: list[str] = []
+    if n8n_token_source() != "env":
+        unmet.append(
+            "The n8n token was not supplied by the launcher, so n8n may not have it "
+            "(set LAYA_N8N_TOKEN on both the engine and n8n)."
+        )
+
+    db = await get_db()
+    clone_rows = await db.execute_fetchall(
+        """SELECT platform, source_type, workflow_update_error
+           FROM sources WHERE connection_id IS NOT NULL AND workflow_id IS NOT NULL""",
+    )
+    versions = nb._load_deployed_versions()
+    if not clone_rows and not versions:
+        return unmet
+
+    handler_version = nb.error_handler_bundled_version()
+    if handler_version and (
+        not versions.get(nb._ERROR_HANDLER_ID_KEY)
+        or versions.get(nb._ERROR_HANDLER_NAME) != handler_version
+    ):
+        unmet.append("The shared error handler workflow is not at the bundled version yet.")
+
+    bundled: dict[str, str | None] = {}
+    if nb.WORKFLOWS_DIR.exists():
+        for wf_file in nb.WORKFLOWS_DIR.glob("*.json"):
+            try:
+                data = json.loads(wf_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            bundled[data.get("name", "")] = (data.get("meta") or {}).get("laya_version")
+
+    from laya.integrations.platforms import PLATFORMS
+
+    type_to_template: dict[tuple[str, str], str] = {}
+    for platform_key, config in PLATFORMS.items():
+        for wf_name in config.get("workflows", []):
+            kind = "executor" if "executor" in wf_name.lower() else "ingestion"
+            type_to_template[(platform_key, kind)] = wf_name
+
+    stale: list[str] = []
+    for row in clone_rows:
+        if row["source_type"] != "ingestion":
+            continue
+        name = type_to_template.get((row["platform"], row["source_type"]))
+        if name and name in bundled and versions.get(name) != bundled[name] and name not in stale:
+            stale.append(name)
+    if stale:
+        unmet.append(
+            "These templates have not been pushed to their clones yet: " + ", ".join(sorted(stale)) + "."
+        )
+
+    flagged = sum(1 for row in clone_rows if row["workflow_update_error"])
+    if flagged:
+        unmet.append(
+            f"{flagged} workflow{'s' if flagged != 1 else ''} failed to update "
+            "(see the workflow list below)."
+        )
+    return unmet
+
+
+async def evaluate_readiness() -> dict:
+    """Switch to `enforce` when nothing blocks it. Never switches back.
+
+    Returns {"mode": ..., "unmet": [...]} for the caller's log or response.
+    """
+    global _last_unmet
+    if hatch_active() or get_mode() == MODE_ENFORCE:
+        _last_unmet = []
+        return {"mode": get_mode(), "unmet": []}
+    try:
+        unmet = await unmet_conditions()
+    except Exception as e:
+        log.warning("n8n_auth_readiness_check_failed", error=str(e))
+        return {"mode": MODE_LOG, "unmet": _last_unmet}
+    _last_unmet = unmet
+    if unmet:
+        log.info("n8n_auth_not_ready", unmet=unmet)
+        return {"mode": MODE_LOG, "unmet": unmet}
+    set_enforced()
+    return {"mode": MODE_ENFORCE, "unmet": []}
+
+
+async def status_report() -> dict:
+    """`status()` plus the live readiness picture, for the Settings n8n panel."""
+    from laya.db.sqlite import get_db
+    from laya.integrations.n8n_bootstrap import get_error_handler_update_error
+
+    report = status()
+    report["unmet"] = [] if report["mode"] == MODE_ENFORCE else await unmet_conditions()
+    report["error_handler_update_error"] = await get_error_handler_update_error()
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT COUNT(*) AS n FROM sources WHERE workflow_update_error IS NOT NULL",
+    )
+    report["flagged_clones"] = rows[0]["n"] if rows else 0
+    return report

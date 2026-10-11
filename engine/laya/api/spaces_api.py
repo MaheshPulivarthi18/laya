@@ -484,6 +484,10 @@ async def update_source_workflow(source_id: str) -> SourceResponse:
 
     await update_clone(row, template, ctx)
 
+    # A repaired clone may have been the last thing holding enforcement back.
+    from laya.security.n8n_auth import evaluate_readiness
+    await evaluate_readiness()
+
     refreshed = await db.execute_fetchall(
         """SELECT src.*, s.name AS space_name
            FROM sources src

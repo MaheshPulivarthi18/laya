@@ -768,6 +768,11 @@ async def import_workflows(base_url: str) -> int:
         return 0
 
     _save_deployed_versions(deployed_versions)
+
+    # Every clone and the error handler have now been pushed (or flagged), so
+    # this is the moment the token can start being enforced.
+    from laya.security.n8n_auth import evaluate_readiness
+    await evaluate_readiness()
     return changed
 
 
