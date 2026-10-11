@@ -324,3 +324,115 @@ def ensure_engine_token() -> str:
             hint=f"No usable keychain; set {ENGINE_TOKEN_ENV} to supply a known token.",
         )
     return token
+
+
+# ---------------------------------------------------------------------------
+# n8n token — the credential the bundled n8n workflows present to the engine.
+# ---------------------------------------------------------------------------
+
+N8N_TOKEN_KEY = "laya_n8n_token"
+
+# Environment variable through which a launcher supplies the n8n token. The
+# Tauri shell sets the same variable on the engine and on n8n at spawn; the
+# workflows read it with `$env.LAYA_N8N_TOKEN`. A developer running both by
+# hand sets it on both processes.
+N8N_TOKEN_ENV = "LAYA_N8N_TOKEN"
+
+# Token pinned for the lifetime of this process, with where it came from:
+# "env" (launcher-supplied), "keychain", or "memory" (minted, not persisted).
+# The source matters: only an env-supplied token is known to be shared with
+# n8n, so only then can enforcement be switched on automatically.
+_process_n8n_token: str | None = None
+_n8n_token_source: str | None = None
+
+
+def store_n8n_token(token: str) -> bool:
+    """Store the n8n token in the OS keychain."""
+    try:
+        import keyring
+
+        keyring.set_password(SERVICE_NAME, N8N_TOKEN_KEY, token)
+        _cache_store(N8N_TOKEN_KEY, token)
+        log.info("n8n_token_stored")
+        return True
+    except Exception as e:
+        log.error("n8n_token_store_failed", error=str(e))
+        return False
+
+
+def get_n8n_token() -> str | None:
+    """Return the n8n token: the process-pinned value, else the keychain (TTL-cached)."""
+    if _process_n8n_token:
+        return _process_n8n_token
+    hit, val = _cache_lookup(N8N_TOKEN_KEY)
+    if hit:
+        return val
+    try:
+        import keyring
+
+        val = keyring.get_password(SERVICE_NAME, N8N_TOKEN_KEY)
+        _cache_store(N8N_TOKEN_KEY, val)
+        return val
+    except Exception as e:
+        log.warning("n8n_token_read_failed", error=str(e))
+        return None
+
+
+def delete_n8n_token() -> bool:
+    """Remove the n8n token from the OS keychain."""
+    try:
+        import keyring
+
+        keyring.delete_password(SERVICE_NAME, N8N_TOKEN_KEY)
+        _cache_drop(N8N_TOKEN_KEY)
+        return True
+    except Exception:
+        return False
+
+
+def n8n_token_source() -> str | None:
+    """Where this process's n8n token came from ("env", "keychain", "memory"), or None before resolution."""
+    return _n8n_token_source
+
+
+def ensure_n8n_token() -> str:
+    """Resolve the n8n token for this process and return it.
+
+    Same resolution order as `ensure_engine_token`:
+    1. N8N_TOKEN_ENV, when set; the variable is removed from the environment
+       so child processes the engine spawns (CLI agents) do not inherit it.
+    2. The token stored in the OS keychain.
+    3. A newly minted token, stored in the keychain, or pinned in memory when
+       the keychain write fails.
+    """
+    global _process_n8n_token, _n8n_token_source
+
+    env_token = os.environ.pop(N8N_TOKEN_ENV, "").strip()
+    if env_token:
+        _process_n8n_token = env_token
+        _n8n_token_source = "env"
+        log.info("n8n_token_ready", source="env")
+        return env_token
+
+    if _process_n8n_token:
+        return _process_n8n_token
+
+    token = get_n8n_token()
+    if token:
+        _n8n_token_source = "keychain"
+        log.info("n8n_token_ready", source="keychain")
+        return token
+
+    token = secrets.token_urlsafe(32)
+    if store_n8n_token(token):
+        _n8n_token_source = "keychain"
+        log.info("n8n_token_ready", source="keychain", minted=True)
+    else:
+        _process_n8n_token = token
+        _n8n_token_source = "memory"
+        log.warning(
+            "n8n_token_not_persisted",
+            source="memory",
+            hint=f"No usable keychain; set {N8N_TOKEN_ENV} on the engine and n8n to supply a known token.",
+        )
+    return token

@@ -108,7 +108,7 @@ def _reset_http_client():
 @pytest.fixture(autouse=True)
 def _bypass_engine_auth_for_existing_tests(request):
     """Bypass require_engine_auth for existing tests that do not test engine auth."""
-    if "test_engine_auth" in request.node.nodeid:
+    if "test_engine_auth" in request.node.nodeid or "test_n8n_auth" in request.node.nodeid:
         yield
         return
     from laya.main import app

@@ -108,6 +108,13 @@ DEFAULT_SETTINGS = {
         "tool_scopes": {"read": True, "write": False, "egress": False},
         "auth_mode": "bearer",  # "bearer" | "none"
     },
+    # Enforcement of the n8n token on the routes the bundled workflows call
+    # (security/n8n_auth.py). "log" until every workflow carries the token,
+    # then "enforce"; never switched back automatically.
+    "n8n_auth": {
+        "mode": "log",  # "log" | "enforce"
+        "enforced_since": None,
+    },
     "omni": {
         "enabled": True,
         "resynthesis_time": "17:00",

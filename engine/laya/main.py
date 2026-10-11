@@ -64,7 +64,7 @@ from laya.pipeline.omni import start_omni_processor, stop_omni_processor
 from laya.pipeline.queue import recover_stalled_cards, recover_stalled_events, start_consumer, stop_consumer
 from laya.scheduler import start_scheduler, stop_scheduler
 from laya.security.engine_auth import require_engine_auth
-from laya.security.keychain import ensure_engine_token, load_all_keys_to_env
+from laya.security.keychain import ensure_engine_token, ensure_n8n_token, load_all_keys_to_env
 
 log = structlog.get_logger()
 
@@ -260,6 +260,9 @@ async def lifespan(app: FastAPI):
 
     # Resolve the engine API token (launcher-supplied env var, else keychain)
     ensure_engine_token()
+
+    # Resolve the token the bundled n8n workflows present (same resolution)
+    ensure_n8n_token()
 
     # Ensure an MCP bearer token exists when auth_mode=bearer so the SSE
     # endpoint is immediately usable. Token only generated if missing.
