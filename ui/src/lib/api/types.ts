@@ -1022,6 +1022,20 @@ export interface N8nBootstrapResponse {
 	has_api_key: boolean;
 }
 
+/** GET /settings/n8n/auth-status: enforcement of the token n8n presents to the engine */
+export interface N8nAuthStatus {
+	mode: 'log' | 'enforce';
+	enforced_since: string | null;
+	hatch_active: boolean;
+	token_source: 'env' | 'keychain' | 'memory' | null;
+	rejected_since_start: number;
+	last_rejected_at: string | null;
+	/** Human-readable conditions still blocking enforcement; empty when enforced. */
+	unmet: string[];
+	error_handler_update_error: string | null;
+	flagged_clones: number;
+}
+
 /** Platforms registry response */
 export interface PlatformsResponse {
 	platforms: Record<string, PlatformConfig>;

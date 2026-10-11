@@ -12,6 +12,7 @@
 	import type {
 		N8nTestResult,
 		N8nBootstrapResponse,
+		N8nAuthStatus,
 		AvailableWorkflow,
 		Source
 	} from '$lib/api/types';
@@ -106,6 +107,23 @@
 		} finally {
 			loadingWorkflows = false;
 		}
+		void loadAuthStatus();
+	}
+
+	// Enforcement state of the token n8n presents to the engine.
+	let authStatus = $state<N8nAuthStatus | null>(null);
+
+	async function loadAuthStatus() {
+		try {
+			authStatus = await engineApi.getN8nAuthStatus();
+		} catch {
+			authStatus = null;
+		}
+	}
+
+	function formatTime(value: string | null | undefined): string {
+		const d = parseBackendDate(value);
+		return d ? d.toLocaleString() : '';
 	}
 
 	async function doBootstrap() {
@@ -267,6 +285,7 @@
 				sources[idx] = refreshed;
 				sources = [...sources];
 			}
+			void loadAuthStatus();
 		} catch (e) {
 			workflowError = e instanceof Error ? e.message : 'Failed to update workflow';
 		} finally {
@@ -461,6 +480,51 @@
 						</svg>
 						Open n8n Dashboard
 					</a>
+				</div>
+			{/if}
+
+			{#if hasN8nKey && authStatus}
+				<!-- Engine credential: the token n8n presents on the routes its workflows call -->
+				<div class="mt-4 border-t border-surface-700 pt-4">
+					<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+						<span class="text-laya-secondary font-semibold uppercase tracking-wider text-surface-400">Engine credential</span>
+						<span
+							class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-laya-micro font-medium
+								{authStatus.mode === 'enforce' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-300'}"
+							title={authStatus.mode === 'enforce'
+								? `Requests without the token are rejected since ${formatTime(authStatus.enforced_since)}`
+								: 'Requests without the token are logged and accepted until every workflow carries it'}
+						>
+							<span class="h-1.5 w-1.5 rounded-full {authStatus.mode === 'enforce' ? 'bg-green-400' : 'bg-yellow-300'}"></span>
+							{authStatus.mode === 'enforce' ? 'Enforced' : 'Log mode'}
+						</span>
+						<span class="text-laya-secondary text-surface-400">
+							Token from {authStatus.token_source === 'env' ? 'the app' : authStatus.token_source === 'keychain' ? 'the keychain' : authStatus.token_source === 'memory' ? 'this session only' : 'unknown'}
+						</span>
+						<span class="text-laya-secondary {authStatus.rejected_since_start > 0 ? 'text-amber-300' : 'text-surface-400'}">
+							{authStatus.rejected_since_start} request{authStatus.rejected_since_start === 1 ? '' : 's'} without a valid token since start{authStatus.last_rejected_at ? `, last ${formatTime(authStatus.last_rejected_at)}` : ''}
+						</span>
+					</div>
+					{#if authStatus.hatch_active}
+						<p class="mt-2 text-laya-secondary text-amber-300">
+							LAYA_N8N_AUTH=off is set: enforcement is paused for this session.
+						</p>
+					{/if}
+					{#if authStatus.error_handler_update_error}
+						<p class="mt-2 text-laya-secondary text-red-400">
+							Error handler workflow update failed: {authStatus.error_handler_update_error}
+						</p>
+					{/if}
+					{#if authStatus.mode !== 'enforce' && authStatus.unmet.length > 0}
+						<div class="mt-2 text-laya-secondary text-surface-400">
+							<span>Enforcement starts once:</span>
+							<ul class="mt-1 list-disc space-y-0.5 pl-5">
+								{#each authStatus.unmet as reason}
+									<li>{reason}</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
 				</div>
 			{/if}
 		</div>

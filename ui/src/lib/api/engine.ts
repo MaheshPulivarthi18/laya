@@ -24,6 +24,7 @@ import type {
 	CreateConnectionResponse,
 	ConnectionTestResult,
 	N8nBootstrapResponse,
+	N8nAuthStatus,
 	DaySummaryResponse,
 	SpacesResponse,
 	SourcesResponse,
@@ -670,6 +671,8 @@ export const engineApi = {
 		request<N8nBootstrapResponse>('/settings/n8n/bootstrap', {
 			method: 'POST'
 		}),
+
+	getN8nAuthStatus: () => request<N8nAuthStatus>('/settings/n8n/auth-status'),
 
 	// Spaces
 	getSpaces: () => request<SpacesResponse>('/spaces'),

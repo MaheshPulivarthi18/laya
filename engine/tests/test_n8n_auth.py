@@ -341,3 +341,20 @@ async def test_import_workflows_runs_the_readiness_check(db, workflows, monkeypa
     result = await n8n_auth.evaluate_readiness()
     assert result["mode"] == "log"
     assert any("error handler" in u for u in result["unmet"])
+
+
+@pytest.mark.asyncio
+async def test_auth_status_endpoint_requires_app_token_and_reports(db, workflows, monkeypatch):
+    _token_from(monkeypatch, "env")
+    async with _client() as client:
+        anon = await client.get("/settings/n8n/auth-status")
+        n8n = await client.get("/settings/n8n/auth-status", headers={n8n_auth.HEADER_NAME: N8N_TOKEN})
+        ok = await client.get("/settings/n8n/auth-status", headers={"Authorization": f"Bearer {APP_TOKEN}"})
+    assert anon.status_code == 401
+    assert n8n.status_code == 401
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["mode"] == "log"
+    assert body["token_source"] == "env"
+    assert body["flagged_clones"] == 0
+    assert body["unmet"] == []

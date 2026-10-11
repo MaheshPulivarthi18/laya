@@ -572,6 +572,14 @@ async def bootstrap_n8n() -> dict:
     return result
 
 
+@router.get("/settings/n8n/auth-status")
+async def n8n_auth_status() -> dict:
+    """State of the n8n token enforcement for the Settings n8n panel."""
+    from laya.security.n8n_auth import status_report
+
+    return await status_report()
+
+
 @router.get("/settings/detect-agents")
 async def detect_agents() -> dict:
     """Auto-detect installed agent CLI binaries and return their paths."""
