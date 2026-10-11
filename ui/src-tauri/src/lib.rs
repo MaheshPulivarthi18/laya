@@ -500,6 +500,37 @@ pub(crate) fn engine_token() -> &'static str {
     })
 }
 
+/// Environment variable that carries the n8n token. The same name is set on
+/// both processes: the engine reads and removes it at startup
+/// (`laya.security.keychain.ensure_n8n_token`), and n8n keeps it so workflow
+/// nodes can send it as `X-Laya-N8n-Token` through `$env.LAYA_N8N_TOKEN`.
+pub(crate) const N8N_TOKEN_ENV: &str = "LAYA_N8N_TOKEN";
+
+static N8N_TOKEN: OnceLock<String> = OnceLock::new();
+
+/// Token the bundled n8n workflows present to the engine, fixed for the
+/// lifetime of this process. It is deliberately a different secret from
+/// `engine_token()`: workflow expressions can read n8n's environment, so the
+/// token n8n holds grants only the few routes the workflows call. The shell
+/// hands the same value to the engine and to n8n at spawn, so an engine
+/// respawn or a "Start n8n" from the Status page keeps both sides in step.
+///
+/// A dev build honors a preset `LAYA_N8N_TOKEN` so a developer can call the
+/// n8n routes by hand with a known value.
+pub(crate) fn n8n_token() -> &'static str {
+    N8N_TOKEN.get_or_init(|| {
+        if cfg!(dev) {
+            if let Ok(preset) = std::env::var(N8N_TOKEN_ENV) {
+                let preset = preset.trim();
+                if !preset.is_empty() {
+                    return preset.to_string();
+                }
+            }
+        }
+        generate_engine_token()
+    })
+}
+
 /// 32 bytes from the OS random source, hex-encoded.
 fn generate_engine_token() -> String {
     let mut bytes = [0u8; 32];
@@ -529,7 +560,16 @@ fn engine_token_init_script(token: &str, include_dev_origins: bool) -> String {
 
 #[cfg(test)]
 mod engine_token_tests {
-    use super::{engine_token_init_script, generate_engine_token};
+    use super::{engine_token, engine_token_init_script, generate_engine_token, n8n_token};
+
+    #[test]
+    fn n8n_token_is_stable_and_distinct_from_the_engine_token() {
+        let n8n = n8n_token();
+        assert_eq!(n8n.len(), 64);
+        assert!(n8n.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(n8n, n8n_token());
+        assert_ne!(n8n, engine_token());
+    }
 
     #[test]
     fn generated_token_is_64_hex_chars_and_unique() {

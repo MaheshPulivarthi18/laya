@@ -759,6 +759,9 @@ fn spawn_n8n() -> Result<Child, String> {
         .env("LAYA_ENGINE_URL", format!("http://127.0.0.1:{}", std::env::var("LAYA_ENGINE_PORT").unwrap_or_else(|_| "8420".to_string())))
         // n8n 2.x blocks $env access in workflow expressions by default
         .env("N8N_BLOCK_ENV_ACCESS_IN_NODE", "false")
+        // The bundled workflows read this with `$env.LAYA_N8N_TOKEN` and send
+        // it as the X-Laya-N8n-Token header on every call to the engine.
+        .env(crate::N8N_TOKEN_ENV, crate::n8n_token())
         // Workflow expressions can read n8n's environment (see above), so the
         // engine API token must not be in it. It is only present in the shell's
         // own environment when a developer presets it for a dev build.

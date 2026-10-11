@@ -915,7 +915,8 @@ fn spawn_dev_engine() -> Result<Child, String> {
         .arg("laya.main")
         .current_dir(&engine)
         .env("LAYA_PARENT_PID", std::process::id().to_string())
-        .env(crate::ENGINE_TOKEN_ENV, crate::engine_token());
+        .env(crate::ENGINE_TOKEN_ENV, crate::engine_token())
+        .env(crate::N8N_TOKEN_ENV, crate::n8n_token());
 
     #[cfg(unix)]
     unsafe {
@@ -977,7 +978,9 @@ fn spawn_prod_engine() -> Result<Child, String> {
         // a worker subprocess on Windows, so os.getppid() points at the wrong PID).
         .env("LAYA_PARENT_PID", std::process::id().to_string())
         // The engine authenticates REST requests against this token.
-        .env(crate::ENGINE_TOKEN_ENV, crate::engine_token());
+        .env(crate::ENGINE_TOKEN_ENV, crate::engine_token())
+        // The token n8n presents on the routes the bundled workflows call.
+        .env(crate::N8N_TOKEN_ENV, crate::n8n_token());
     // AppImage env vars break even the venv Python (see sanitize_python_cmd).
     sanitize_python_cmd(&mut cmd);
 
