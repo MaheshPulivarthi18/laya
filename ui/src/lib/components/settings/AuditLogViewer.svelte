@@ -258,8 +258,12 @@
 	let filteredExpanded = $state(false);
 	let filteredOffset = $state(0);
 
-	async function loadFilteredEvents() {
-		filteredLoading = true;
+	// silent: skip the loading flag. The section is gated on `!filteredLoading`,
+	// so flipping it while paging would unmount the table, collapse the page and
+	// drop the viewport onto the audit log table below. Paging keeps the current
+	// rows on screen until the next page lands.
+	async function loadFilteredEvents({ silent = false }: { silent?: boolean } = {}) {
+		if (!silent) filteredLoading = true;
 		try {
 			const resp = await engineApi.getFilteredEvents({ limit: FILTERED_LIMIT, offset: filteredOffset });
 			filteredEvents = resp.events;
@@ -267,21 +271,21 @@
 		} catch {
 			// Silent — supplementary section
 		} finally {
-			filteredLoading = false;
+			if (!silent) filteredLoading = false;
 		}
 	}
 
 	function filteredPrevPage() {
 		if (filteredOffset >= FILTERED_LIMIT) {
 			filteredOffset -= FILTERED_LIMIT;
-			loadFilteredEvents();
+			loadFilteredEvents({ silent: true });
 		}
 	}
 
 	function filteredNextPage() {
 		if (filteredOffset + FILTERED_LIMIT < filteredTotal) {
 			filteredOffset += FILTERED_LIMIT;
-			loadFilteredEvents();
+			loadFilteredEvents({ silent: true });
 		}
 	}
 
@@ -321,8 +325,12 @@
 	}
 
 	// ── Audit log functions ──
-	async function load() {
-		loading = true;
+	// silent: keep the current rows on screen while the next page loads. Paging
+	// sets it so the table (gated on `!loading`) is not replaced by the spinner,
+	// which would shrink the page and move the viewport. Initial load and filter
+	// changes keep the spinner.
+	async function load({ silent = false }: { silent?: boolean } = {}) {
+		if (!silent) loading = true;
 		error = '';
 		try {
 			const params: Record<string, unknown> = { limit, offset };
@@ -375,14 +383,14 @@
 	function prevPage() {
 		if (offset >= limit) {
 			offset -= limit;
-			load();
+			load({ silent: true });
 		}
 	}
 
 	function nextPage() {
 		if (offset + limit < total) {
 			offset += limit;
-			load();
+			load({ silent: true });
 		}
 	}
 
@@ -695,6 +703,28 @@
 
 			{#if filteredExpanded}
 				<div transition:slide={{ duration: $reducedMotion ? 0 : 200 }} class="mt-3">
+					<!-- Filtered events pagination -->
+					<div class="mb-2 flex items-center justify-between text-laya-secondary text-surface-400">
+						<span>{filteredTotal.toLocaleString()} filtered</span>
+						<div class="flex items-center gap-2">
+							<button
+								onclick={filteredPrevPage}
+								disabled={filteredOffset === 0}
+								class="rounded px-2 py-1 transition-colors hover:bg-surface-700 disabled:opacity-30"
+							>
+								Prev
+							</button>
+							<span>{filteredPage} / {filteredTotalPages}</span>
+							<button
+								onclick={filteredNextPage}
+								disabled={filteredOffset + FILTERED_LIMIT >= filteredTotal}
+								class="rounded px-2 py-1 transition-colors hover:bg-surface-700 disabled:opacity-30"
+							>
+								Next
+							</button>
+						</div>
+					</div>
+
 					<div class="overflow-visible {$glassTheme ? 'glass-section' : 'rounded-lg border border-surface-700'}">
 						<table class="w-full table-fixed text-left text-laya-secondary">
 							<thead class="border-b {$glassTheme ? 'border-white/[0.06] bg-white/[0.03]' : 'border-surface-700 bg-surface-800'} text-surface-400">
@@ -755,28 +785,6 @@
 								{/each}
 							</tbody>
 						</table>
-					</div>
-
-					<!-- Filtered events pagination -->
-					<div class="mt-2 flex items-center justify-between text-laya-secondary text-surface-400">
-						<span>{filteredTotal.toLocaleString()} filtered</span>
-						<div class="flex items-center gap-2">
-							<button
-								onclick={filteredPrevPage}
-								disabled={filteredOffset === 0}
-								class="rounded px-2 py-1 transition-colors hover:bg-surface-700 disabled:opacity-30"
-							>
-								Prev
-							</button>
-							<span>{filteredPage} / {filteredTotalPages}</span>
-							<button
-								onclick={filteredNextPage}
-								disabled={filteredOffset + FILTERED_LIMIT >= filteredTotal}
-								class="rounded px-2 py-1 transition-colors hover:bg-surface-700 disabled:opacity-30"
-							>
-								Next
-							</button>
-						</div>
 					</div>
 				</div>
 			{/if}
