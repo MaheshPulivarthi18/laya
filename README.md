@@ -205,6 +205,15 @@ sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-
 ### Troubleshooting
 
 <details>
+<summary><strong>Ingestion stopped and the engine log shows <code>n8n_auth_missing</code> with <code>rejected=True</code></strong></summary>
+
+The engine is enforcing the n8n token (see "Engine API authentication") and a workflow is calling it without one. Open **Settings → Integrations → n8n**: a workflow row with a warning icon failed to take the latest template; press **Update workflow** on it. If n8n was started by hand, make sure it has the same `LAYA_N8N_TOKEN` as the engine.
+
+To get ingestion flowing again before fixing the cause, start the engine with `LAYA_N8N_AUTH=off`. That pauses enforcement for that run only; editing `n8n_auth.mode` in `settings.json` back to `log` does not stick, because the engine re-enables enforcement as soon as every workflow is up to date.
+
+</details>
+
+<details>
 <summary><strong>Linux: Tailwind CSS classes missing or styles not updating</strong></summary>
 
 The default Linux inotify file watcher limit (65,536) can be too low for this project -- Vite needs to watch the source files while the Rust `target/` directory consumes most of the quota, causing Tailwind CSS to silently fail to generate utility classes. Increase the limit:
@@ -375,7 +384,11 @@ curl -H "Authorization: Bearer $LAYA_ENGINE_TOKEN" http://127.0.0.1:8420/setting
 
 A standalone engine started without `LAYA_ENGINE_TOKEN` creates a token and stores it in the OS keychain (service `laya-engine`, account `laya_engine_api_token`).
 
-The routes the bundled n8n workflows call (`POST /events`, `GET /repos`, `GET /metadata/{key}`, `POST /ingestion-errors`) and the OAuth redirect callback accept requests without a token. The WebSocket at `/ws` is not authenticated yet.
+**The n8n token.** The bundled n8n workflows use a second, separate token, `LAYA_N8N_TOKEN`, sent as the `X-Laya-N8n-Token` header. It is accepted only on the four routes the workflows call (`POST /events`, `POST /ingestion-errors`, `GET /repos`, `GET /metadata/{key}`), which also accept the app token; it opens nothing else. The app generates it per launch and sets the same variable on the engine and on n8n. When you run the engine or n8n by hand, set `LAYA_N8N_TOKEN` to the same value on both (n8n reads it with `$env.LAYA_N8N_TOKEN`; the engine stores a keychain token under `laya_n8n_token` if the variable is absent, but n8n will not know that value).
+
+Enforcement is staged so an upgrade cannot drop events: the engine runs in **log mode** (requests without the token are logged and accepted) until the startup workflow sync has pushed the header-sending template to every cloned workflow and the error handler, then switches to **enforce** and stays there. Settings → Integrations → n8n shows the mode, what is still blocking enforcement, and how many requests arrived without a valid token.
+
+The OAuth redirect callback accepts requests without a token. The WebSocket at `/ws` is not authenticated yet.
 
 ### Configuration
 
