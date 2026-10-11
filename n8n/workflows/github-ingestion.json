@@ -24,7 +24,16 @@
       "parameters": {
         "method": "GET",
         "url": "={{ $env.LAYA_ENGINE_URL }}/repos?platform=github",
-        "options": {}
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
+            }
+          ]
+        }
       },
       "name": "Get Repos",
       "type": "n8n-nodes-base.httpRequest",
@@ -150,6 +159,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
             }
           ]
         },
@@ -164,7 +177,10 @@
       "position": [
         1560,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -240,6 +256,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
             }
           ]
         },
@@ -411,6 +431,6 @@
   },
   "active": false,
   "meta": {
-    "laya_version": "2026.09.29"
+    "laya_version": "2026.10.11"
   }
 }

@@ -62,6 +62,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
             }
           ]
         },
@@ -76,7 +80,10 @@
       "position": [
         1000,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -119,6 +126,6 @@
   },
   "active": false,
   "meta": {
-    "laya_version": "2026.04.4"
+    "laya_version": "2026.10.11"
   }
 }

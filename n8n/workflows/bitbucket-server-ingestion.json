@@ -24,7 +24,16 @@
       "parameters": {
         "method": "GET",
         "url": "={{ $env.LAYA_ENGINE_URL }}/metadata/bitbucket_server-config:{{ $workflow.id }}",
-        "options": {}
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
+            }
+          ]
+        }
       },
       "name": "Fetch Server Config",
       "type": "n8n-nodes-base.httpRequest",
@@ -50,7 +59,16 @@
       "parameters": {
         "method": "GET",
         "url": "={{ $env.LAYA_ENGINE_URL }}/repos?host={{ encodeURIComponent($json.host) }}",
-        "options": {}
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
+            }
+          ]
+        }
       },
       "name": "Get Repos",
       "type": "n8n-nodes-base.httpRequest",
@@ -238,6 +256,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
             }
           ]
         },
@@ -252,7 +274,10 @@
       "position": [
         2400,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -442,6 +467,6 @@
   },
   "active": false,
   "meta": {
-    "laya_version": "2026.08.8"
+    "laya_version": "2026.10.11"
   }
 }

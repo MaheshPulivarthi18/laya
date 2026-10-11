@@ -21,6 +21,12 @@
       "parameters": {
         "method": "GET",
         "url": "={{ $env.LAYA_ENGINE_URL }}/metadata/slack-channels:{{ $workflow.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Laya-N8n-Token", "value": "={{ $env.LAYA_N8N_TOKEN }}" }
+          ]
+        },
         "options": {
           "response": {
             "response": {
@@ -244,7 +250,8 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Content-Type", "value": "application/json" }
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Laya-N8n-Token", "value": "={{ $env.LAYA_N8N_TOKEN }}" }
           ]
         },
         "sendBody": true,
@@ -255,7 +262,10 @@
       "name": "POST to Laya Engine",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3100, 300]
+      "position": [3100, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -313,6 +323,6 @@
   },
   "active": false,
   "meta": {
-    "laya_version": "2026.09.28"
+    "laya_version": "2026.10.11"
   }
 }

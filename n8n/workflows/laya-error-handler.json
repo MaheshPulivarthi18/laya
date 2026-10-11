@@ -33,6 +33,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-Laya-N8n-Token",
+              "value": "={{ $env.LAYA_N8N_TOKEN }}"
             }
           ]
         },
@@ -83,6 +87,6 @@
   },
   "active": true,
   "meta": {
-    "laya_version": "2026.04.0"
+    "laya_version": "2026.10.11"
   }
 }
