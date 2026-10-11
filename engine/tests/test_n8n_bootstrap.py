@@ -355,7 +355,7 @@ class TestEnsureN8nReady:
 class TestImportWorkflows:
     """Tests for workflow import."""
 
-    async def test_imports_workflow_files(self, tmp_path):
+    async def test_imports_workflow_files(self, db, tmp_path):
         wf_dir = tmp_path / "workflows"
         wf_dir.mkdir()
         (wf_dir / "test-workflow.json").write_text(json.dumps({

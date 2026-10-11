@@ -734,6 +734,10 @@ export const engineApi = {
 			body: JSON.stringify({ active })
 		}),
 
+	/** Re-push the bundled template onto one cloned workflow; returns the refreshed source row. */
+	updateSourceWorkflow: (sourceId: string) =>
+		request<Source>(`/sources/${encodeURIComponent(sourceId)}/update-workflow`, { method: 'POST' }),
+
 	createSource: (source: { name: string; platform: string; workflow_id: string; space_id?: string; source_type?: string; webhook_path?: string }) =>
 		request<Source>('/sources', {
 			method: 'POST',

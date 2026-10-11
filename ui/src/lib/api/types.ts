@@ -1096,6 +1096,9 @@ export interface Source {
 	source_type?: string;
 	webhook_path?: string;
 	created_at?: string;
+	/** Last failed push of the bundled template to this clone; null when up to date. */
+	workflow_update_error?: string | null;
+	workflow_update_failed_at?: string | null;
 }
 
 /** Available n8n workflow for source assignment */

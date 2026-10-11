@@ -438,10 +438,73 @@ async def list_sources() -> dict:
             source_type=r["source_type"],
             webhook_path=r["webhook_path"],
             created_at=r["created_at"],
+            workflow_update_error=r["workflow_update_error"],
+            workflow_update_failed_at=r["workflow_update_failed_at"],
         )
         for r in rows
     ]
     return {"sources": sources}
+
+
+@router.post("/sources/{source_id}/update-workflow")
+async def update_source_workflow(source_id: str) -> SourceResponse:
+    """Re-push the bundled template onto one cloned workflow.
+
+    Used from the Settings workflow list when a clone is flagged with a failed
+    update. Runs the same per-clone update as startup propagation and returns
+    the row with its refreshed status.
+    """
+    from laya.config import get_n8n_config
+    from laya.integrations.n8n_bootstrap import load_propagation_context, update_clone
+    from laya.security.keychain import get_api_key
+
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        """SELECT src.*, s.name AS space_name
+           FROM sources src
+           LEFT JOIN spaces s ON src.space_id = s.space_id
+           WHERE src.source_id = ?""",
+        (source_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Source not found")
+    row = rows[0]
+    if not row["connection_id"] or not row["workflow_id"]:
+        raise HTTPException(status_code=422, detail="This source is not a cloned workflow")
+
+    api_key = get_api_key("n8n")
+    if not api_key:
+        raise HTTPException(status_code=422, detail="n8n API key not configured")
+    base_url = get_n8n_config()["base_url"].rstrip("/")
+
+    ctx = await load_propagation_context(base_url, api_key)
+    template = ctx.template_for(row)
+    if template is None:
+        raise HTTPException(status_code=422, detail="No bundled template matches this workflow")
+
+    await update_clone(row, template, ctx)
+
+    refreshed = await db.execute_fetchall(
+        """SELECT src.*, s.name AS space_name
+           FROM sources src
+           LEFT JOIN spaces s ON src.space_id = s.space_id
+           WHERE src.source_id = ?""",
+        (source_id,),
+    )
+    r = refreshed[0]
+    return SourceResponse(
+        source_id=r["source_id"],
+        name=r["name"],
+        platform=r["platform"],
+        workflow_id=r["workflow_id"],
+        space_id=r["space_id"],
+        space_name=r["space_name"],
+        source_type=r["source_type"],
+        webhook_path=r["webhook_path"],
+        created_at=r["created_at"],
+        workflow_update_error=r["workflow_update_error"],
+        workflow_update_failed_at=r["workflow_update_failed_at"],
+    )
 
 
 @router.get("/sources/available-workflows")

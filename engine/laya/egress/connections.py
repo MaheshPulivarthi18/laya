@@ -671,6 +671,7 @@ async def _clone_workflows_for_connection(
         _get_error_handler_id,
         _load_deployed_versions,
         _save_deployed_versions,
+        inject_platform_credential,
     )
     from laya.integrations.n8n_client import activate_workflow
 
@@ -689,8 +690,6 @@ async def _clone_workflows_for_connection(
     if not template_names:
         return 0, []
 
-    n8n_type = platform_config.get("n8n_type", "")
-    n8n_node = platform_config.get("n8n_node", "")
     activated = 0
     errors: list[str] = []
 
@@ -777,44 +776,12 @@ async def _clone_workflows_for_connection(
                 if old_path:
                     node["parameters"]["path"] = f"{old_path}-{short_id}"
 
-            # Inject credential into matching nodes
-            node_creds = node.get("credentials", {})
-            params = node.get("parameters", {})
-            node_type = node.get("type", "")
-            node_cred_type = params.get("nodeCredentialType")
-            # HTTP Request nodes (e.g. Gmail archive/star/mark_read) bind the
-            # credential under the key named by nodeCredentialType, which can
-            # differ from the platform's native n8n_type — Gmail's native type
-            # is "gmailOAuth2" but its HTTP nodes use "gmailOAuth2Api".  Match
-            # on the HTTP cred type for this platform and inject under that key,
-            # otherwise n8n can't resolve the credential at runtime and the
-            # node fails with "Credentials not found".
-            from laya.egress.oauth import _PLATFORM_HTTP_CRED_TYPES
-            http_cred_type = _PLATFORM_HTTP_CRED_TYPES.get(platform)
-            is_http_match = (
-                http_cred_type is not None
-                and node_type == "n8n-nodes-base.httpRequest"
-                and node_cred_type == http_cred_type
-            )
-            is_native_match = (
-                n8n_type in node_creds
-                # n8n_node may be "" for generic-HTTP platforms (bitbucket_server);
-                # unguarded startswith("") would match EVERY node and spray the
-                # credential across the whole workflow.
-                or (bool(n8n_node) and (
-                    node_type == n8n_node
-                    or node_type.startswith(n8n_node)  # matches gmailTrigger, googleCalendarTrigger, etc.
-                ))
-                or node_cred_type == n8n_type
-            )
-            if is_http_match or is_native_match:
-                if "credentials" not in node:
-                    node["credentials"] = {}
-                cred_key = http_cred_type if is_http_match else n8n_type
-                node["credentials"][cred_key] = {
-                    "id": n8n_credential_id,
-                    "name": connection_name,
-                }
+        # Bind this connection's n8n credential to every node that needs it.
+        # The same matcher runs when a template update is propagated to the
+        # clone later, so both paths bind the same nodes.
+        inject_platform_credential(
+            wf_data.get("nodes", []), platform, n8n_credential_id, connection_name,
+        )
 
         # 3. Create workflow in n8n (or reuse existing if same name already exists)
         target_name = wf_data["name"]

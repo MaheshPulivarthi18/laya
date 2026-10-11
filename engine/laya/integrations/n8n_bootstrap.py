@@ -302,19 +302,63 @@ async def _get_existing_workflows(base_url: str, api_key: str) -> dict[str, dict
         return None
 
 
-async def _get_workflow_full(base_url: str, api_key: str, workflow_id: str) -> dict | None:
-    """Fetch the full workflow definition including node credentials."""
-    try:
-        resp = await get_client().get(
-            f"{base_url}/api/v1/workflows/{workflow_id}",
-            headers={"X-N8N-API-KEY": api_key},
-            timeout=10.0,
+def inject_platform_credential(
+    nodes: list[dict], platform: str, cred_id: str, cred_name: str,
+) -> int:
+    """Bind a connection's n8n credential to every node of a workflow that needs it.
+
+    Used both when a template is cloned for a new connection and when a
+    bundled template update is propagated to existing clones, so the same
+    nodes are matched in both cases. Returns the number of nodes bound.
+
+    A node matches when any of these hold:
+    - it already carries a credential slot of the platform's native n8n type
+      (templates ship placeholders keyed by that type);
+    - its node type is the platform's native node (or a variant of it, e.g.
+      `gmailTrigger` for `gmail`);
+    - it is an HTTP Request node whose `nodeCredentialType` is the platform's
+      native type, or the platform's HTTP-request credential type from
+      `_PLATFORM_HTTP_CRED_TYPES` (bound under that key, which n8n resolves
+      at runtime; a credential bound under the wrong key fails with
+      "Credentials not found").
+
+    Platforms with no native node (`n8n_node == ""`, e.g. bitbucket_server)
+    only match through the credential slot or `nodeCredentialType`; an
+    unguarded `startswith("")` would match every node and spray the
+    credential across the whole workflow.
+    """
+    from laya.egress.oauth import _PLATFORM_HTTP_CRED_TYPES
+    from laya.integrations.platforms import PLATFORMS
+
+    platform_config = PLATFORMS.get(platform, {})
+    n8n_type = platform_config.get("n8n_type", "")
+    n8n_node = platform_config.get("n8n_node", "")
+    if not n8n_type:
+        return 0
+    http_cred_type = _PLATFORM_HTTP_CRED_TYPES.get(platform)
+
+    bound = 0
+    for node in nodes:
+        node_creds = node.get("credentials", {})
+        params = node.get("parameters", {})
+        node_type = node.get("type", "")
+        node_cred_type = params.get("nodeCredentialType")
+        is_http_match = (
+            http_cred_type is not None
+            and node_type == "n8n-nodes-base.httpRequest"
+            and node_cred_type == http_cred_type
         )
-        if resp.status_code == 200:
-            return resp.json()
-        return None
-    except Exception:
-        return None
+        is_native_match = (
+            n8n_type in node_creds
+            or (bool(n8n_node) and (node_type == n8n_node or node_type.startswith(n8n_node)))
+            or node_cred_type == n8n_type
+        )
+        if is_http_match or is_native_match:
+            node.setdefault("credentials", {})
+            cred_key = http_cred_type if is_http_match else n8n_type
+            node["credentials"][cred_key] = {"id": cred_id, "name": cred_name}
+            bound += 1
+    return bound
 
 
 def _merge_credentials(old_nodes: list[dict], new_nodes: list[dict]) -> list[dict]:
@@ -392,6 +436,57 @@ def _get_error_handler_id() -> str | None:
     return versions.get(_ERROR_HANDLER_ID_KEY)
 
 
+# Metadata row (space 'default') holding the last failure to push the bundled
+# error-handler template into n8n. The handler is a singleton with no `sources`
+# row, so it cannot use the per-clone columns. NULL/absent means "up to date".
+ERROR_HANDLER_UPDATE_ERROR_KEY = "n8n-error-handler:update_error"
+
+
+async def _set_error_handler_update_error(reason: str | None) -> None:
+    """Record (or clear, when reason is None) the error handler's last update failure."""
+    from laya.db.sqlite import get_db
+
+    try:
+        db = await get_db()
+        if reason is None:
+            await db.execute(
+                "DELETE FROM metadata WHERE key = ? AND space_id = 'default'",
+                (ERROR_HANDLER_UPDATE_ERROR_KEY,),
+            )
+        else:
+            await db.execute(
+                """INSERT INTO metadata (key, value, space_id)
+                   VALUES (?, ?, 'default')
+                   ON CONFLICT (key, space_id) DO UPDATE SET value = excluded.value""",
+                (ERROR_HANDLER_UPDATE_ERROR_KEY, reason),
+            )
+        await db.commit()
+    except Exception as e:
+        log.warning("n8n_error_handler_status_write_failed", error=str(e))
+
+
+async def get_error_handler_update_error() -> str | None:
+    """Return the error handler's last recorded update failure, or None."""
+    from laya.db.sqlite import get_db
+
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT value FROM metadata WHERE key = ? AND space_id = 'default'",
+        (ERROR_HANDLER_UPDATE_ERROR_KEY,),
+    )
+    return rows[0]["value"] if rows else None
+
+
+def error_handler_bundled_version() -> str | None:
+    """Return the laya_version of the bundled error-handler template, or None."""
+    handler_file = WORKFLOWS_DIR / _ERROR_HANDLER_FILENAME
+    try:
+        data = json.loads(handler_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return (data.get("meta") or {}).get("laya_version")
+
+
 async def _ensure_error_handler_workflow(base_url: str, api_key: str) -> str | None:
     """Make sure the shared "Laya - Error Handler" workflow exists in n8n.
 
@@ -399,7 +494,9 @@ async def _ensure_error_handler_workflow(base_url: str, api_key: str) -> str | N
     known before any ingestion clone update injects settings.errorWorkflow.
 
     Self-heals: if the handler was deleted in the n8n UI, this re-creates it.
-    Version bumps on the bundled handler JSON trigger an in-place update.
+    Version bumps on the bundled handler JSON trigger an in-place update. The
+    deployed version is recorded only after n8n accepted the update, so a
+    failed push is retried on the next startup.
     """
     if not WORKFLOWS_DIR.exists():
         return None
@@ -429,21 +526,23 @@ async def _ensure_error_handler_workflow(base_url: str, api_key: str) -> str | N
         handler_id = str(existing["id"])
         deployed_version = versions.get(_ERROR_HANDLER_NAME)
         # Update stored ID (self-heal if user recreated it in the UI)
-        if stored_id != handler_id or deployed_version != bundled_version:
+        if stored_id != handler_id:
             versions[_ERROR_HANDLER_ID_KEY] = handler_id
-            if bundled_version:
-                versions[_ERROR_HANDLER_NAME] = bundled_version
             _save_deployed_versions(versions)
         # If the bundled template is a newer version than what's deployed, push
         # an in-place update so the payload shape / node logic stays current.
         if bundled_version and deployed_version != bundled_version:
-            ok = await _update_workflow(base_url, api_key, handler_id, handler_data)
+            ok, reason = await _update_workflow(base_url, api_key, handler_id, handler_data)
             if ok:
+                versions[_ERROR_HANDLER_NAME] = bundled_version
+                _save_deployed_versions(versions)
+                await _set_error_handler_update_error(None)
                 log.info("n8n_error_handler_updated",
                          workflow_id=handler_id, version=bundled_version)
             else:
+                await _set_error_handler_update_error(reason)
                 log.warning("n8n_error_handler_update_failed",
-                            workflow_id=handler_id, version=bundled_version)
+                            workflow_id=handler_id, version=bundled_version, reason=reason)
         log.debug("n8n_error_handler_ready", workflow_id=handler_id)
         return handler_id
 
@@ -491,6 +590,7 @@ async def _ensure_error_handler_workflow(base_url: str, api_key: str) -> str | N
     if bundled_version:
         versions[_ERROR_HANDLER_NAME] = bundled_version
     _save_deployed_versions(versions)
+    await _set_error_handler_update_error(None)
     log.info("n8n_error_handler_created", workflow_id=handler_id, version=bundled_version)
     return handler_id
 
@@ -498,21 +598,41 @@ async def _ensure_error_handler_workflow(base_url: str, api_key: str) -> str | N
 # Fields that n8n's PUT /api/v1/workflows/{id} accepts.
 _N8N_PUT_ALLOWED_FIELDS = {"name", "nodes", "connections", "settings", "staticData", "tags"}
 
+# User-facing reasons for a failed workflow update. They are shown on the
+# Settings workflow list, so they name the situation without stack traces or
+# internal ids.
+REASON_WORKFLOW_MISSING = "Workflow no longer exists in n8n"
+REASON_N8N_UNREACHABLE = "n8n unreachable"
+
 
 async def _update_workflow(
     base_url: str, api_key: str, workflow_id: str, new_data: dict,
-) -> bool:
+) -> tuple[bool, str | None]:
     """Update an existing workflow in-place, preserving credentials and active state.
 
-    Returns True on success.
+    Returns (True, None) on success, or (False, reason) with a short
+    user-facing reason the caller can store and display.
     """
     headers = {"X-N8N-API-KEY": api_key, "Content-Type": "application/json"}
 
     # Fetch the full existing workflow to get credentials and active state
-    existing = await _get_workflow_full(base_url, api_key, workflow_id)
-    if not existing:
-        log.warning("n8n_workflow_update_fetch_failed", workflow_id=workflow_id)
-        return False
+    try:
+        fetch_resp = await get_client().get(
+            f"{base_url}/api/v1/workflows/{workflow_id}",
+            headers={"X-N8N-API-KEY": api_key},
+            timeout=10.0,
+        )
+    except Exception as e:
+        log.warning("n8n_workflow_update_fetch_failed", workflow_id=workflow_id, error=str(e))
+        return False, REASON_N8N_UNREACHABLE
+    if fetch_resp.status_code == 404:
+        log.warning("n8n_workflow_update_fetch_failed", workflow_id=workflow_id, status=404)
+        return False, REASON_WORKFLOW_MISSING
+    if fetch_resp.status_code != 200:
+        log.warning("n8n_workflow_update_fetch_failed", workflow_id=workflow_id,
+                    status=fetch_resp.status_code)
+        return False, f"Couldn't read the workflow from n8n (HTTP {fetch_resp.status_code})"
+    existing = fetch_resp.json()
 
     was_active = existing.get("active", False)
 
@@ -539,16 +659,21 @@ async def _update_workflow(
     if "settings" not in put_body:
         put_body["settings"] = existing.get("settings", {})
 
-    resp = await get_client().put(
-        f"{base_url}/api/v1/workflows/{workflow_id}",
-        headers=headers,
-        json=put_body,
-        timeout=10.0,
-    )
+    try:
+        resp = await get_client().put(
+            f"{base_url}/api/v1/workflows/{workflow_id}",
+            headers=headers,
+            json=put_body,
+            timeout=10.0,
+        )
+    except Exception as e:
+        log.warning("n8n_workflow_update_failed", workflow_id=workflow_id, error=str(e))
+        return False, REASON_N8N_UNREACHABLE
     if resp.status_code not in (200, 201):
         log.warning("n8n_workflow_update_failed", workflow_id=workflow_id,
                      status=resp.status_code, body=resp.text[:200])
-        return False
+        detail = resp.text.strip()[:120]
+        return False, f"n8n rejected the update (HTTP {resp.status_code}{': ' + detail if detail else ''})"
 
     # Reactivate if it was active before
     if was_active:
@@ -566,7 +691,7 @@ async def _update_workflow(
         except Exception as e:
             log.warning("n8n_workflow_reactivate_failed", workflow_id=workflow_id, error=str(e))
 
-    return True
+    return True, None
 
 
 async def import_workflows(base_url: str) -> int:
@@ -626,40 +751,59 @@ async def import_workflows(base_url: str) -> int:
         except Exception as e:
             log.warning("n8n_workflow_version_check_error", name=workflow_file.stem, error=str(e))
 
-    # Propagate template updates to any cloned workflow instances
+    # Propagate template updates to any cloned workflow instances. Clones
+    # flagged by an earlier failed push are retried here too, even when their
+    # template's version did not change. The version record is written only
+    # when propagation ran to completion: a clone that failed inside it is
+    # flagged on its own row, but if propagation itself raised (n8n or the
+    # database unavailable) nothing was flagged, so the versions must stay
+    # unrecorded for the next startup to try again.
     changed = 0
-    if templates_needing_update:
-        try:
-            changed = await _propagate_to_clones(base_url, api_key, templates_needing_update)
-            if changed:
-                log.info("n8n_clones_updated", count=changed)
-        except Exception as e:
-            log.warning("n8n_clone_propagation_failed", error=str(e))
+    try:
+        changed = await _propagate_to_clones(base_url, api_key, templates_needing_update)
+        if changed:
+            log.info("n8n_clones_updated", count=changed)
+    except Exception as e:
+        log.warning("n8n_clone_propagation_failed", error=str(e))
+        return 0
 
     _save_deployed_versions(deployed_versions)
     return changed
 
 
-async def _propagate_to_clones(base_url: str, api_key: str, changed_templates: list[str]) -> int:
-    """Propagate template workflow updates to all cloned instances.
+class PropagationContext:
+    """Everything needed to rebuild any clone from its bundled template."""
 
-    Clones are identified by having a connection_id in the sources table.
-    For each clone, we find its template (by matching platform + source_type
-    to a template workflow name), then apply the template's structural changes
-    while preserving the clone's credentials, webhook paths, and name.
-    """
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        template_data_map: dict[str, dict],
+        type_to_template: dict[tuple[str, str], str],
+        conn_cred_map: dict[str, tuple[str, str]],
+        error_handler_id: str | None,
+    ) -> None:
+        self.base_url = base_url
+        self.api_key = api_key
+        self.template_data_map = template_data_map
+        self.type_to_template = type_to_template
+        self.conn_cred_map = conn_cred_map
+        self.error_handler_id = error_handler_id
+
+    def template_for(self, row) -> dict | None:
+        """Return the bundled template a clone row was created from, or None."""
+        template_name = self.type_to_template.get((row["platform"], row["source_type"]))
+        if not template_name:
+            return None
+        return self.template_data_map.get(template_name)
+
+
+async def load_propagation_context(base_url: str, api_key: str) -> PropagationContext:
+    """Load the bundled templates and connection credentials that clone updates need."""
     from laya.db.sqlite import get_db
     from laya.integrations.platforms import PLATFORMS
 
-    db = await get_db()
-    clone_rows = await db.execute_fetchall(
-        """SELECT source_id, name, platform, workflow_id, source_type, webhook_path, connection_id
-           FROM sources WHERE connection_id IS NOT NULL AND workflow_id IS NOT NULL""",
-    )
-    if not clone_rows:
-        return 0
-
-    # Build template name → workflow data map from bundled JSON
     template_data_map: dict[str, dict] = {}
     if WORKFLOWS_DIR.exists():
         for wf_file in WORKFLOWS_DIR.glob("*.json"):
@@ -669,61 +813,77 @@ async def _propagate_to_clones(base_url: str, api_key: str, changed_templates: l
             except Exception:
                 continue
 
-    # Build platform+source_type → template name mapping
     type_to_template: dict[tuple[str, str], str] = {}
     for platform_key, config in PLATFORMS.items():
         for wf_name in config.get("workflows", []):
             source_type = "executor" if "executor" in wf_name.lower() else "ingestion"
             type_to_template[(platform_key, source_type)] = wf_name
 
-    # Look up n8n_credential_id + connection name for each connection_id
-    conn_ids = list({row["connection_id"] for row in clone_rows if row["connection_id"]})
-    conn_cred_map: dict[str, tuple[str, str]] = {}  # connection_id → (n8n_credential_id, name)
-    if conn_ids:
-        placeholders = ",".join("?" for _ in conn_ids)
-        cred_rows = await db.execute_fetchall(
-            f"SELECT connection_id, n8n_credential_id, name FROM egress_connections WHERE connection_id IN ({placeholders})",
-            conn_ids,
-        )
-        for cr in cred_rows:
-            if cr["n8n_credential_id"]:
-                conn_cred_map[cr["connection_id"]] = (cr["n8n_credential_id"], cr["name"] or "")
+    db = await get_db()
+    cred_rows = await db.execute_fetchall(
+        "SELECT connection_id, n8n_credential_id, name FROM egress_connections",
+    )
+    conn_cred_map: dict[str, tuple[str, str]] = {}
+    for cr in cred_rows:
+        if cr["n8n_credential_id"]:
+            conn_cred_map[cr["connection_id"]] = (cr["n8n_credential_id"], cr["name"] or "")
 
+    return PropagationContext(
+        base_url=base_url,
+        api_key=api_key,
+        template_data_map=template_data_map,
+        type_to_template=type_to_template,
+        conn_cred_map=conn_cred_map,
+        error_handler_id=_get_error_handler_id(),
+    )
+
+
+async def _record_clone_update_result(source_id: str, reason: str | None) -> None:
+    """Store a clone's last update failure on its `sources` row, or clear it."""
+    from laya.db.sqlite import get_db
+    from laya.db.timeutil import db_now
+
+    db = await get_db()
+    if reason is None:
+        await db.execute(
+            "UPDATE sources SET workflow_update_error = NULL, workflow_update_failed_at = NULL "
+            "WHERE source_id = ?",
+            (source_id,),
+        )
+    else:
+        await db.execute(
+            "UPDATE sources SET workflow_update_error = ?, workflow_update_failed_at = ? "
+            "WHERE source_id = ?",
+            (reason, db_now(), source_id),
+        )
+    await db.commit()
+
+
+async def update_clone(row, template: dict, ctx: PropagationContext) -> tuple[bool, str | None]:
+    """Push the bundled template onto one clone and record the outcome on its row.
+
+    The clone keeps its name, its executor webhook path and its connection's
+    credential; everything else (nodes, connections, settings) comes from the
+    template. Ingestion clones are wired to the shared error handler. Returns
+    (True, None) on success or (False, reason) with the stored reason.
+    """
     import copy
 
-    # Ingestion clones get settings.errorWorkflow injected so their node
-    # failures route to the shared Laya error handler. Executor clones run on
-    # user-initiated egress and their failures already surface via
-    # action_cards.last_error.
-    error_handler_id = _get_error_handler_id()
-    if not error_handler_id:
-        log.info("n8n_propagate_no_error_handler_id")
+    source_type = row["source_type"]
+    wf_id = row["workflow_id"]
+    clone_name = row["name"]
 
-    updated = 0
-    for row in clone_rows:
-        platform = row["platform"]
-        source_type = row["source_type"]
-        wf_id = row["workflow_id"]
-        clone_name = row["name"]
-        connection_id = row["connection_id"]
-
-        template_name = type_to_template.get((platform, source_type))
-        if not template_name or template_name not in template_data_map:
-            continue
-        if template_name not in changed_templates:
-            continue  # This clone's template hasn't changed — skip
-
-        template = template_data_map[template_name]
-
-        # Build update data from template but preserve clone's name
+    try:
         update_data = copy.deepcopy(template)
         update_data["name"] = clone_name
 
-        # Wire this ingestion clone to the shared error handler.
-        if error_handler_id and source_type == "ingestion":
-            update_data.setdefault("settings", {})["errorWorkflow"] = error_handler_id
+        # Ingestion clones get settings.errorWorkflow so their node failures
+        # route to the shared Laya error handler. Executor clones run on
+        # user-initiated egress and their failures already surface via
+        # action_cards.last_error.
+        if ctx.error_handler_id and source_type == "ingestion":
+            update_data.setdefault("settings", {})["errorWorkflow"] = ctx.error_handler_id
 
-        # Preserve clone's webhook paths in the update data
         clone_webhook_path = row["webhook_path"]
         if clone_webhook_path:
             for node in update_data.get("nodes", []):
@@ -732,58 +892,67 @@ async def _propagate_to_clones(base_url: str, api_key: str, changed_templates: l
                     node["parameters"]["path"] = clone_webhook_path
                     break
 
-        # Inject the connection's real n8n credential into all matching nodes,
-        # exactly like _clone_workflows_for_connection does. This is more
-        # reliable than merging from old nodes (which may already have
-        # placeholder credentials from a previous broken sync).
-        platform_config = PLATFORMS.get(platform, {})
-        n8n_type = platform_config.get("n8n_type", "")
-        n8n_node = platform_config.get("n8n_node", "")
-        cred_info = conn_cred_map.get(connection_id)
-        if cred_info and n8n_type:
+        # Bind the connection's real credential directly from the template.
+        # This is more reliable than merging from the old nodes, which may
+        # still carry placeholders from an earlier broken sync.
+        cred_info = ctx.conn_cred_map.get(row["connection_id"])
+        if cred_info:
             cred_id, cred_name = cred_info
-            # Platforms where HTTP Request nodes carry a different credential
-            # type suffix than the platform's native n8n_type (e.g. Gmail:
-            # native is "gmailOAuth2", HTTP nodes need "gmailOAuth2Api"). Must
-            # be kept in sync with _PLATFORM_HTTP_CRED_TYPES in egress/oauth.py.
-            from laya.egress.oauth import _PLATFORM_HTTP_CRED_TYPES
-            http_cred_type = _PLATFORM_HTTP_CRED_TYPES.get(platform)
-            for node in update_data.get("nodes", []):
-                node_creds = node.get("credentials", {})
-                params = node.get("parameters", {})
-                node_type = node.get("type", "")
-                node_cred_type = params.get("nodeCredentialType")
-                is_http_match = (
-                    http_cred_type is not None
-                    and node_type == "n8n-nodes-base.httpRequest"
-                    and node_cred_type == http_cred_type
-                )
-                is_native_match = (
-                    n8n_type in node_creds
-                    # n8n_node may be "" for generic-HTTP platforms
-                    # (bitbucket_server); unguarded startswith("") would match
-                    # EVERY node and spray the credential across the workflow.
-                    or (bool(n8n_node) and (
-                        node_type == n8n_node
-                        or node_type.startswith(n8n_node)
-                    ))
-                    or node_cred_type == n8n_type
-                )
-                if is_http_match or is_native_match:
-                    if "credentials" not in node:
-                        node["credentials"] = {}
-                    cred_key = http_cred_type if is_http_match else n8n_type
-                    node["credentials"][cred_key] = {
-                        "id": cred_id,
-                        "name": cred_name,
-                    }
+            inject_platform_credential(
+                update_data.get("nodes", []), row["platform"], cred_id, cred_name,
+            )
 
-        # _update_workflow handles credential merging as a secondary fallback
-        if await _update_workflow(base_url, api_key, wf_id, update_data):
+        ok, reason = await _update_workflow(ctx.base_url, ctx.api_key, wf_id, update_data)
+    except Exception as e:
+        log.warning("n8n_clone_update_error", name=clone_name, workflow_id=wf_id, error=str(e))
+        ok, reason = False, REASON_N8N_UNREACHABLE
+
+    await _record_clone_update_result(row["source_id"], reason)
+    if ok:
+        log.info("n8n_clone_updated", name=clone_name, workflow_id=wf_id)
+    else:
+        log.warning("n8n_clone_update_failed", name=clone_name, workflow_id=wf_id, reason=reason)
+    return ok, reason
+
+
+async def _propagate_to_clones(
+    base_url: str, api_key: str, changed_templates: list[str], *, force: bool = False,
+) -> int:
+    """Push bundled template updates to the cloned workflow instances.
+
+    Clones are the `sources` rows that carry a connection_id. A clone is
+    pushed when its template is in `changed_templates`, when its row is
+    flagged with a previous update failure, or when `force` is set (every
+    clone). Returns the number of clones updated successfully.
+    """
+    from laya.db.sqlite import get_db
+
+    db = await get_db()
+    clone_rows = await db.execute_fetchall(
+        """SELECT source_id, name, platform, workflow_id, source_type, webhook_path,
+                  connection_id, workflow_update_error
+           FROM sources WHERE connection_id IS NOT NULL AND workflow_id IS NOT NULL""",
+    )
+    if not clone_rows:
+        return 0
+
+    ctx = await load_propagation_context(base_url, api_key)
+    if not ctx.error_handler_id:
+        log.info("n8n_propagate_no_error_handler_id")
+
+    updated = 0
+    for row in clone_rows:
+        template_name = ctx.type_to_template.get((row["platform"], row["source_type"]))
+        template = ctx.template_data_map.get(template_name) if template_name else None
+        if not template:
+            continue
+        flagged = row["workflow_update_error"] is not None
+        if not (force or flagged or template_name in changed_templates):
+            continue
+
+        ok, _ = await update_clone(row, template, ctx)
+        if ok:
             updated += 1
-            log.info("n8n_clone_updated", name=clone_name, workflow_id=wf_id)
-        else:
-            log.warning("n8n_clone_update_failed", name=clone_name, workflow_id=wf_id)
 
     return updated
 

@@ -83,6 +83,9 @@ class SourceResponse(BaseModel):
     source_type: str = "ingestion"
     webhook_path: str | None = None
     created_at: str | None = None
+    # Last failed push of the bundled template to this clone (None = up to date).
+    workflow_update_error: str | None = None
+    workflow_update_failed_at: str | None = None
 
 
 class SourceAssignment(BaseModel):
