@@ -35,12 +35,9 @@
 	}
 </script>
 
-<!-- Fixed titlebar: drag region + browser nav + center content + right content + window controls -->
-<div
-	class="fixed top-0 left-0 right-0 z-[9999] flex h-[38px] select-none items-center bg-surface-900"
-	class:pl-[72px]={currentPlatform === 'macos'}
-	class:pl-3={currentPlatform !== 'macos'}
->
+<!-- Fixed titlebar: drag region + browser nav + center content + right content + window controls.
+     On macOS the native title bar sits above the webview in the same surface colour and holds the traffic lights. -->
+<div class="fixed top-0 left-0 right-0 z-[9999] flex h-[38px] select-none items-center bg-surface-900 pl-3">
 	<!-- Browser navigation controls (back / forward / reload) -->
 	<div class="flex items-center gap-1 pr-2">
 		<div class="flex items-center rounded-lg bg-surface-800 border border-surface-700">

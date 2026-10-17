@@ -163,14 +163,20 @@
 				<!-- Indented to the band it points INTO, so the arrow reads as the step
 				     down between the two rather than floating loose in the gap. -->
 				<div
-					class="flex items-center gap-[7px] py-[5px] text-[calc(9.5px*var(--om-scale))]"
+					class="flex flex-none items-center gap-[7px] py-[5px] text-[calc(9.5px*var(--om-scale))]"
 					style="color: var(--om-text-meta); min-height: var(--om-funnel-gap); margin-left: {bands[i + 1].layer.indent};"
 				>
 					<span class="om-mono text-[calc(11px*var(--om-scale))]" aria-hidden="true">↓</span>
 					{note}
 				</div>
 			{:else}
-				<div style="height: var(--om-funnel-gap);"></div>
+				<!-- flex-none is load-bearing. This column is a height-constrained flex
+				     container (flex-1 + overflow-y-auto), and when the bands overflow it
+				     the browser shrinks every shrinkable child to make up the deficit.
+				     An empty div has a min-content height of 0, so without flex-none it
+				     collapses completely and the bands render flush against each other
+				     whenever the funnel is tall enough to scroll. -->
+				<div class="flex-none" style="height: var(--om-funnel-gap);"></div>
 			{/if}
 		{/if}
 	{/each}
@@ -178,7 +184,7 @@
 	<!-- The tail of the chain: what left Milestones is what left Omni entirely. -->
 	{#if annotation('milestone')}
 		<div
-			class="flex items-center gap-[7px] py-[5px] text-[calc(9.5px*var(--om-scale))]"
+			class="flex flex-none items-center gap-[7px] py-[5px] text-[calc(9.5px*var(--om-scale))]"
 			style="color: var(--om-text-meta); min-height: var(--om-funnel-gap); margin-left: {LAYERS[LAYERS.length - 1].indent};"
 		>
 			<span class="om-mono text-[calc(11px*var(--om-scale))]" aria-hidden="true">↓</span>

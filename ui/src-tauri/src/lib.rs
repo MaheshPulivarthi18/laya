@@ -188,8 +188,10 @@ async fn pick_folder(app: tauri::AppHandle, title: Option<String>) -> Result<Str
 // ── Theme sync ─────────────────────────────────────────────────────────
 
 /// Update the native window background color to match the active theme.
-/// On macOS the unfocused traffic lights become grayscale — if the window
-/// background doesn't match the theme, the lights disappear against it.
+/// On macOS the transparent native title bar is painted in this colour,
+/// directly above the web title bar, so it has to equal the theme's
+/// surface-900 for the two to read as one bar. It also keeps the greyed
+/// traffic lights of an unfocused window visible against the band.
 #[tauri::command]
 fn set_window_theme(app: tauri::AppHandle, theme: String) {
     #[cfg(target_os = "macos")]
@@ -201,11 +203,11 @@ fn set_window_theme(app: tauri::AppHandle, theme: String) {
             use cocoa::base::{id, nil};
             let ns_window = win.ns_window().unwrap() as id;
             let (r, g, b) = if theme == "light" {
-                // Warm cream matching light-theme surface-900 (~oklch(0.97 0.005 74))
-                (247.0, 245.0, 240.0)
+                // Light surface-900, oklch(0.970 0.005 74) in app.css
+                (247.0, 245.0, 241.0)
             } else {
-                // Dark surface-900 (~rgb(24,24,27))
-                (24.0, 24.0, 27.0)
+                // Dark surface-900, oklch(0.185 0.007 48) in app.css
+                (21.0, 18.0, 16.0)
             };
             unsafe {
                 let bg_color = NSColor::colorWithRed_green_blue_alpha_(
