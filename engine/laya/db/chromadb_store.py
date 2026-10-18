@@ -440,15 +440,29 @@ async def embed_batch(
     step = max(1, batch_size)
     for start in range(0, total, step):
         end = min(start + step, total)
-        await loop.run_in_executor(
-            None,
-            partial(
-                collection.upsert,
-                ids=ids[start:end],
-                documents=texts[start:end],
-                metadatas=metadatas[start:end],
-            ),
-        )
+        try:
+            await loop.run_in_executor(
+                None,
+                partial(
+                    collection.upsert,
+                    ids=ids[start:end],
+                    documents=texts[start:end],
+                    metadatas=metadatas[start:end],
+                ),
+            )
+        except Exception as e:
+            # A slice can fail as a whole when the encoder runs out of GPU
+            # memory on a batch of long texts (seen as "MPS backend out of
+            # memory" on Apple silicon). One text at a time needs a fraction of
+            # that memory, so retry the slice singly before giving up.
+            if end - start == 1:
+                raise
+            log.warning("embed_batch_slice_failed_retrying_singly", start=start, end=end, error=str(e))
+            for i in range(start, end):
+                await loop.run_in_executor(
+                    None,
+                    partial(collection.upsert, ids=[ids[i]], documents=[texts[i]], metadatas=[metadatas[i]]),
+                )
         done = end
         if on_batch is not None:
             await on_batch(done, total)

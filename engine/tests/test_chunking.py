@@ -132,3 +132,19 @@ class TestChunkUnits:
 
     def test_empty_units_yield_nothing(self):
         assert chunk_units([]) == []
+
+
+class TestOversizedChunks:
+    def test_sentence_without_boundaries_is_cut(self):
+        blob = " ".join(["word"] * 2000)  # ~10K chars, no sentence boundary
+        chunks = chunk_units([TextUnit(text=blob, page=4, heading="Table")], max_chunk_chars=3000)
+        assert len(chunks) >= 4
+        for c in chunks:
+            assert len(c.text) <= 3000 + len("Table\n")
+            assert c.page_start == 4 and c.page_end == 4
+            assert c.heading == "Table"
+        assert " ".join(c.text.split("\n", 1)[1] for c in chunks).split() == blob.split()
+
+    def test_run_without_whitespace_is_cut_hard(self):
+        chunks = chunk_units([TextUnit(text="x" * 7000)], max_chunk_chars=3000)
+        assert [len(c.text) for c in chunks] == [3000, 3000, 1000]

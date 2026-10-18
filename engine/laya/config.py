@@ -148,12 +148,14 @@ DEFAULT_SETTINGS = {
     },
     # Corpus documents (laya/documents/). max_file_mb caps uploads and shared
     # paths; the summary_* keys bound the map-reduce summary at ingest; the
-    # embed batch size is the number of chunks encoded per executor call.
+    # embed batch size is the number of chunks encoded per executor call
+    # (kept small: encoder memory grows with batch size times sequence length
+    # squared, and 32 long chunks exhausted an Apple-silicon GPU).
     "documents": {
         "max_file_mb": 50,
         "summary_window_chars": 12000,
         "summary_max_windows": 24,
-        "embed_batch_size": 32,
+        "embed_batch_size": 8,
     },
     "smart_grouping": {
         "context_association": True,

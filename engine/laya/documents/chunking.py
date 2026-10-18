@@ -29,12 +29,21 @@ class DocChunk:
     char_count: int
 
 
+# Sentence packing cannot split a run of text with no sentence boundary (a
+# table dumped as one line, a long code listing), so a single "sentence" can
+# be far larger than the target. Chunks above this size are cut at whitespace:
+# the encoder's memory grows with the square of the sequence length, and a
+# batch of such chunks exhausted the GPU.
+_MAX_CHUNK_CHARS = 3000
+
+
 def chunk_units(
     units: list[TextUnit],
     *,
     target_chars: int = _CHUNK_TARGET_CHARS,
     overlap_chars: int = _CHUNK_OVERLAP_CHARS,
     min_section_chars: int = 300,
+    max_chunk_chars: int = _MAX_CHUNK_CHARS,
 ) -> list[DocChunk]:
     """Pack units into chunks that keep their page range and heading.
 
@@ -44,7 +53,9 @@ def chunk_units(
     packed by ``chunk_segments``; the chunk's page range is the min and max
     page of the sentences it holds. When a heading exists the chunk text is
     prefixed with it once, so the embedded text carries its context the way
-    card text carries its thread context.
+    card text carries its thread context. No chunk exceeds ``max_chunk_chars``:
+    an oversized one is cut at whitespace into pieces that share its page
+    range and heading.
     """
     sections = _sections(units, min_section_chars)
     chunks: list[DocChunk] = []
@@ -54,16 +65,37 @@ def chunk_units(
             if not text.strip():
                 continue
             pages = [p for p, _ in tags if p is not None]
-            body = f"{heading}\n{text}" if heading else text
-            chunks.append(DocChunk(
-                chunk_index=len(chunks),
-                text=body,
-                page_start=min(pages) if pages else None,
-                page_end=max(pages) if pages else None,
-                heading=heading,
-                char_count=len(body),
-            ))
+            for piece in _split_oversized(text, max_chunk_chars):
+                body = f"{heading}\n{piece}" if heading else piece
+                chunks.append(DocChunk(
+                    chunk_index=len(chunks),
+                    text=body,
+                    page_start=min(pages) if pages else None,
+                    page_end=max(pages) if pages else None,
+                    heading=heading,
+                    char_count=len(body),
+                ))
     return chunks
+
+
+def _split_oversized(text: str, max_chars: int) -> list[str]:
+    """Cut ``text`` into pieces of at most ``max_chars``, preferring the last
+    whitespace before the limit; a run with no whitespace is cut hard."""
+    if len(text) <= max_chars:
+        return [text]
+    pieces: list[str] = []
+    rest = text
+    while len(rest) > max_chars:
+        cut = rest.rfind(" ", max_chars // 2, max_chars)
+        if cut == -1:
+            cut = rest.rfind("\n", max_chars // 2, max_chars)
+        if cut == -1:
+            cut = max_chars
+        pieces.append(rest[:cut].strip())
+        rest = rest[cut:].strip()
+    if rest:
+        pieces.append(rest)
+    return [p for p in pieces if p]
 
 
 def _sections(units: list[TextUnit], min_section_chars: int) -> list[tuple[str | None, list[TextUnit]]]:
