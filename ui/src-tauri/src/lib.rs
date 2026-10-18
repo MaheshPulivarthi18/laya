@@ -767,23 +767,39 @@ pub(crate) fn kill_process_on_port(port: u16, identity: &str) {
     }
 }
 
-/// WebKitGTK's DMA-BUF renderer appears to leak compositor backing stores on
-/// pages with nested `backdrop-filter` layers (the glass theme over the
-/// timeline view): on WebKitGTK 2.54 / Mesa radeonsi / Wayland the web
-/// process climbed to ~28 GB every ~90 s, was purged by WebKit's
-/// memory-pressure handler, and on 2026-10-14 lost that race and was
-/// OOM-killed at 41 GB, freezing the desktop. With the DMA-BUF renderer off
-/// (shared-memory buffer upload instead, GPU rasterization kept) the same
-/// page holds at ~100 MB. Measured alone; forcing CPU rasterization
-/// (`WEBKIT_SKIA_ENABLE_CPU_RENDERING`) also works but is not needed.
+/// Disables WebKitGTK's DMA-BUF renderer on WebKitGTK 2.54 and later.
 ///
-/// Must run before the first webview is created — WebKit reads it when it
-/// spawns the web process. An existing value is respected so a user can
-/// still try the DMA-BUF path by exporting their own.
+/// From 2.54 the web process composites with Skia, which paints each
+/// `backdrop-filter` layer's backdrop by repainting the backdrop root's subtree
+/// into a fresh, unbudgeted GPU surface, and every earlier blurred layer in that
+/// subtree repaints its own backdrop again. With more than about 15 blurred
+/// siblings (the glass theme gives every timeline capsule and feed card its own
+/// blur) the compositor thread stops finishing frames and the web process can
+/// grow to tens of GB until it is OOM-killed. With the DMA-BUF renderer off,
+/// WebKit renders without accelerated compositing, on the CPU into shared
+/// memory: frames complete and memory stays flat, at the cost of frame rate.
+/// Earlier versions composite these pages normally, so they keep GPU
+/// acceleration.
+///
+/// Must run before the first webview is created, because WebKit reads the
+/// variable when it spawns the web process. A value the user already exported
+/// is respected, so the DMA-BUF path can still be tried with
+/// `WEBKIT_DISABLE_DMABUF_RENDERER=0`.
 #[cfg(target_os = "linux")]
 fn apply_webkit_rendering_workarounds() {
     const KEY: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
-    if std::env::var_os(KEY).is_none() {
+    if std::env::var_os(KEY).is_some() {
+        return;
+    }
+    // SAFETY: both functions return compile-time constants of the loaded
+    // libwebkit2gtk and need no WebKit or GTK initialisation.
+    let version = unsafe {
+        (
+            webkit2gtk_sys::webkit_get_major_version(),
+            webkit2gtk_sys::webkit_get_minor_version(),
+        )
+    };
+    if version >= (2, 54) {
         std::env::set_var(KEY, "1");
     }
 }
