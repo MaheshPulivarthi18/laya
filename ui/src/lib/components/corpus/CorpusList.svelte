@@ -183,8 +183,8 @@
 								<button onclick={() => open(doc)} class="min-w-0 truncate text-left text-laya-base font-medium text-surface-100 transition-colors hover:text-laya-orange">
 									{doc.title}
 								</button>
-								<span class="shrink-0 rounded border border-surface-600/60 px-1 text-[9px] font-semibold uppercase tracking-wide text-surface-400">{doc.file_type}</span>
 								<span class="ml-auto shrink-0 text-laya-micro font-medium {statusTone(doc)}">{statusLabel(doc.status, prog)}</span>
+								<span class="shrink-0 rounded border border-surface-600/60 px-1 text-[9px] font-semibold uppercase tracking-wide text-surface-400">{doc.file_type}</span>
 							</div>
 							<div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-laya-micro text-surface-500">
 								{#if doc.page_count}<span>{doc.page_count} page{doc.page_count === 1 ? '' : 's'}</span>{/if}

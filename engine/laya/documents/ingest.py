@@ -28,7 +28,7 @@ from typing import Any, AsyncIterator
 import structlog
 
 from laya.api.websocket import manager
-from laya.config import DEFAULT_SETTINGS, DOCUMENTS_DIR, load_settings
+from laya.config import DEFAULT_SETTINGS, DOCUMENTS_DIR, LAYA_HOME, load_settings
 from laya.db.chromadb_store import (
     delete_where,
     embed_batch,
@@ -100,6 +100,27 @@ def _validate_extension(filename: str) -> tuple[str, str]:
             "unsupported",
         )
     return ext, file_type
+
+
+def _resolve_shared_path(path: str) -> tuple[Path, str, str]:
+    """Check a path the user shares (or relocates to) before touching the file.
+
+    The path must be absolute. Symlinks and ``..`` are resolved first, so the
+    checks apply to the file that will actually be read: it must have a
+    supported extension and must not sit inside Laya's own folder
+    (``~/.laya``: settings, database, logs, stored copies). The extension is
+    checked before any filesystem lookup so an arbitrary path cannot be used
+    to probe which files exist. Returns ``(resolved_path, ext, file_type)``.
+    """
+    given = Path(path).expanduser()
+    if not given.is_absolute():
+        raise DocumentError(400, "The path must be absolute", "invalid")
+    resolved = Path(os.path.realpath(given))
+    ext, file_type = _validate_extension(resolved.name)
+    laya_home = os.path.realpath(LAYA_HOME)
+    if resolved == Path(laya_home) or str(resolved).startswith(laya_home + os.sep):
+        raise DocumentError(403, "Files inside Laya's own data folder cannot be shared", "forbidden")
+    return resolved, ext, file_type
 
 
 def _hash_file(path: Path) -> str:
@@ -222,16 +243,11 @@ async def create_from_path(space_id: str, path: str, *, title: str | None = None
     Nothing is copied: the file is hashed where it is and its path and mtime
     are recorded. Raises ``DocumentError`` for 404/413/415/409.
     """
-    src = Path(path).expanduser()
-    try:
-        src = src.absolute()
-    except OSError:
-        pass
+    src, ext, file_type = _resolve_shared_path(path)
     if not src.is_file():
         raise DocumentError(404, f"File not found: {path}", "source_missing")
     if not os.access(src, os.R_OK):
         raise DocumentError(403, f"File is not readable: {path}", "source_missing")
-    ext, file_type = _validate_extension(src.name)
     st = src.stat()
     cap = max_file_bytes()
     if st.st_size > cap:
@@ -597,7 +613,7 @@ async def relocate(document_id: str, path: str) -> dict[str, Any]:
         raise DocumentError(404, "Document not found", "not_found")
     if row.get("storage_mode") != store.STORAGE_REFERENCE:
         raise DocumentError(400, "Only documents shared by path can be relocated", "invalid")
-    src = Path(path).expanduser().absolute()
+    src, _, _ = _resolve_shared_path(path)
     if not src.is_file():
         raise DocumentError(404, f"File not found: {path}", "source_missing")
     sha = await asyncio.to_thread(_hash_file, src)
