@@ -10,7 +10,7 @@
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { fade, fly } from 'svelte/transition';
-	import { corpusSheet, closeCorpusSheet, clearFinishedSheetItems, removeSheetItem, type SheetItem } from '$lib/stores/corpusSheet';
+	import { corpusSheet, closeCorpusSheet, clearFinishedSheetItems, isFinishedItem, removeSheetItem, type SheetItem } from '$lib/stores/corpusSheet';
 	import { submitPendingSheetItems } from '$lib/documents/sheetSubmit';
 	import { spaces, loadSpaces } from '$lib/stores/spaces';
 	import { feedFilters } from '$lib/stores/feedFilters';
@@ -34,16 +34,16 @@
 		return it.documentId ? $documents.find((d) => d.document_id === it.documentId) : undefined;
 	}
 
+	// A submitted tile whose document vanished from the store was deleted
+	// (Corpus page, or another client) while in flight; it no longer counts.
+	const removed = (it: SheetItem) => !!it.documentId && !docFor(it);
+	const readyDocs = $derived(submitted.filter((it) => docFor(it)?.status === 'ready'));
 	const allReady = $derived(
-		submitted.length > 0 && pending.length === 0 && submitted.every((it) => docFor(it)?.status === 'ready')
+		readyDocs.length > 0 && pending.length === 0 && submitted.every((it) => docFor(it)?.status === 'ready' || removed(it))
 	);
 	const anyFailed = $derived(submitted.some((it) => docFor(it)?.status === 'failed'));
 	const allFinished = $derived(
-		items.length > 0 && pending.length === 0 && items.every((it) => {
-			if (it.error) return true;
-			const s = docFor(it)?.status;
-			return s === 'ready' || s === 'failed';
-		})
+		items.length > 0 && pending.length === 0 && items.every((it) => isFinishedItem(it, docFor(it)?.status))
 	);
 
 	// Default space: the single selected feed space, else the default space.
@@ -85,7 +85,7 @@
 	}
 
 	function askAboutThese() {
-		const ids = submitted.map((it) => it.documentId!).filter(Boolean);
+		const ids = readyDocs.map((it) => it.documentId!);
 		done();
 		askAboutDocuments(ids);
 	}
@@ -104,7 +104,7 @@
 		if (it.error) return { label: 'Failed', tone: 'text-red-400', detail: errorLabel(it.errorCode, it.error) };
 		if (it.submitting) return { label: 'Sending', tone: 'text-surface-400' };
 		const doc = docFor(it);
-		if (!doc) return { label: it.documentId ? 'Queued' : 'Pending', tone: 'text-surface-500' };
+		if (!doc) return it.documentId ? { label: 'Removed', tone: 'text-surface-500', detail: 'Deleted from the Corpus' } : { label: 'Pending', tone: 'text-surface-500' };
 		if (doc.status === 'failed') return { label: 'Failed', tone: 'text-red-400', detail: errorLabel(doc.error_code, doc.error) };
 		if (doc.status === 'ready') {
 			const parts = [doc.page_count ? `${doc.page_count} page${doc.page_count === 1 ? '' : 's'}` : null, `${doc.chunk_count} chunk${doc.chunk_count === 1 ? '' : 's'}`].filter(Boolean);
@@ -182,7 +182,7 @@
 				{:else}
 					{#if !allFinished}
 						<p class="text-laya-micro text-surface-500">
-							Processing continues in the background. You can close this window and follow progress in the footer.
+							Processing continues in the background. You can close this window.
 						</p>
 					{/if}
 					<ul class="space-y-1.5">
