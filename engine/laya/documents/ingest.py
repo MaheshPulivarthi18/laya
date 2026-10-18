@@ -108,9 +108,10 @@ def _resolve_shared_path(path: str) -> tuple[Path, str, str]:
     The path must be absolute. Symlinks and ``..`` are resolved first, so the
     checks apply to the file that will actually be read: it must have a
     supported extension and must not sit inside Laya's own folder
-    (``~/.laya``: settings, database, logs, stored copies). The extension is
-    checked before any filesystem lookup so an arbitrary path cannot be used
-    to probe which files exist. Returns ``(resolved_path, ext, file_type)``.
+    (``~/.laya``: settings, database, logs, stored copies). Resolving does not
+    fail for a missing file, and the extension is checked before the caller
+    tests whether the file exists, so an arbitrary path cannot be used to
+    probe which files exist. Returns ``(resolved_path, ext, file_type)``.
     """
     given = Path(path).expanduser()
     if not given.is_absolute():
