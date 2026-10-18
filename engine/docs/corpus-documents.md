@@ -813,7 +813,7 @@ router. Declare static paths (`/documents/supported-types`,
 | Method and path | Input | Output |
 |---|---|---|
 | `POST /documents` | multipart `file`, form `space_id="default"`, `title?` | 202 `DocumentResponse` (`queued`, `storage_mode=copy`); 409 duplicate `{detail:{message, document_id}}`; 413; 415 |
-| `POST /documents/from-path` | `{path, space_id, title?}` | same with `storage_mode=reference`; 404 when the path is not a readable file. This is the path Tauri drops and the picker use. |
+| `POST /documents/from-path` | `{path, space_id, title?}` | same with `storage_mode=reference`; the path must be absolute (400), is resolved through symlinks, must end in a supported extension (415) and must not be inside `~/.laya` (403); 404 when it is not a readable file. This is the path Tauri drops and the picker use. |
 | `GET /documents` | `space_id?, status?, q?, limit=50, offset=0` | `{documents: [DocumentResponse], total}` |
 | `GET /documents/supported-types` | | `{extensions: [...], max_file_mb}` |
 | `GET /documents/by-entity` | `entity_id` | `[DocumentResponse + link_method, confidence]` |
@@ -824,7 +824,7 @@ router. Declare static paths (`/documents/supported-types`,
 | `PATCH /documents/{id}` | `{title}` | updated `DocumentResponse`; FTS trigger plus `update_document_metadata(id, {"title"})` |
 | `POST /documents/{id}/reprocess` | `?stage=all\|embed\|summarize\|link` | 202; `stage=all` re-reads the file, 409 `source_missing` when it is gone |
 | `POST /documents/{id}/resync` | | 202 when the source changed on disk (re-ingest from the path, same id, chunks and vectors replaced); 200 `{status: "unchanged"}` when the hash matches; 409 `source_missing` |
-| `POST /documents/{id}/relocate` | `{path}` | updates `source_path`/`source_mtime` for a moved file after verifying its sha256 matches; 409 on mismatch |
+| `POST /documents/{id}/relocate` | `{path}` | updates `source_path`/`source_mtime` for a moved file after verifying its sha256 matches; 409 on mismatch. The path goes through the same checks as from-path. |
 | `DELETE /documents/{id}` | | `{status: "deleted"}`; never touches a referenced source file |
 
 `DocumentResponse` (`models/document.py`):
