@@ -4,16 +4,18 @@
 	// The "Add to Corpus" sheet: one tile per dropped or picked file, a space
 	// picker, inline errors, and live ingest progress from the documents store.
 	// With a single space the files are submitted as soon as the sheet opens;
-	// with several the user picks the space first.
+	// with several the user picks the space first. Closing the sheet only
+	// hides it: uploads and engine processing continue, the footer indicator
+	// reports progress, and clicking it reopens these tiles.
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { fade, fly } from 'svelte/transition';
-	import { corpusSheet, closeCorpusSheet, updateSheetItem, removeSheetItem, type SheetItem } from '$lib/stores/corpusSheet';
+	import { corpusSheet, closeCorpusSheet, clearFinishedSheetItems, removeSheetItem, type SheetItem } from '$lib/stores/corpusSheet';
+	import { submitPendingSheetItems } from '$lib/documents/sheetSubmit';
 	import { spaces, loadSpaces } from '$lib/stores/spaces';
 	import { feedFilters } from '$lib/stores/feedFilters';
 	import { documents, documentProgress } from '$lib/stores/documents';
 	import { askAboutDocuments } from '$lib/stores/chat';
-	import { uploadFile, uploadPath } from '$lib/documents/upload';
 	import { errorLabel, statusLabel } from '$lib/documents/documentUpdateReducer';
 	import { glassTheme } from '$lib/stores/glassTheme';
 	import { reducedMotion } from '$lib/stores/reducedMotion';
@@ -36,6 +38,13 @@
 		submitted.length > 0 && pending.length === 0 && submitted.every((it) => docFor(it)?.status === 'ready')
 	);
 	const anyFailed = $derived(submitted.some((it) => docFor(it)?.status === 'failed'));
+	const allFinished = $derived(
+		items.length > 0 && pending.length === 0 && items.every((it) => {
+			if (it.error) return true;
+			const s = docFor(it)?.status;
+			return s === 'ready' || s === 'failed';
+		})
+	);
 
 	// Default space: the single selected feed space, else the default space.
 	$effect(() => {
@@ -57,27 +66,19 @@
 
 	async function submit() {
 		const target = spaceId || 'default';
-		const batch = pending;
 		const singleTitle = items.length === 1 ? title.trim() || undefined : undefined;
 		submittedOnce = true;
-		for (const it of batch) {
-			updateSheetItem(it.key, { submitting: true, error: undefined });
-			const outcome = it.path
-				? await uploadPath(it.path, target, singleTitle)
-				: it.file
-					? await uploadFile(it.file, target, singleTitle)
-					: { name: it.name, error: 'Nothing to upload' };
-			updateSheetItem(it.key, {
-				submitting: false,
-				documentId: outcome.document?.document_id,
-				duplicate: outcome.duplicate,
-				error: outcome.error,
-				errorCode: outcome.errorCode
-			});
-		}
+		await submitPendingSheetItems(target, singleTitle);
 	}
 
+	// Hide only; the batch keeps running and the footer shows its progress.
 	function close() {
+		closeCorpusSheet();
+	}
+
+	// Clear the finished tiles so the next drop starts a fresh batch.
+	function done() {
+		clearFinishedSheetItems((id) => $documents.find((d) => d.document_id === id)?.status);
 		closeCorpusSheet();
 		title = '';
 		submittedOnce = false;
@@ -85,17 +86,17 @@
 
 	function askAboutThese() {
 		const ids = submitted.map((it) => it.documentId!).filter(Boolean);
-		close();
+		done();
 		askAboutDocuments(ids);
 	}
 
 	function openCorpus() {
-		close();
+		done();
 		goto('/corpus');
 	}
 
 	function openDocument(documentId: string) {
-		close();
+		closeCorpusSheet();
 		goto(`/corpus?doc=${encodeURIComponent(documentId)}`);
 	}
 
@@ -179,6 +180,11 @@
 						Drop files anywhere in the window to add them. Supported: PDF, DOCX, Markdown, text, CSV, JSON, HTML.
 					</p>
 				{:else}
+					{#if !allFinished}
+						<p class="text-laya-micro text-surface-500">
+							Processing continues in the background. You can close this window and follow progress in the footer.
+						</p>
+					{/if}
 					<ul class="space-y-1.5">
 						{#each items as it (it.key)}
 							{@const st = tileState(it)}
@@ -228,6 +234,11 @@
 						Add {pending.length === 1 ? 'file' : `${pending.length} files`}
 					</button>
 				{:else}
+					{#if allFinished}
+						<button onclick={done} class="rounded-md px-3 py-1.5 text-laya-secondary text-surface-400 hover:text-surface-200">Done</button>
+					{:else}
+						<button onclick={close} class="rounded-md px-3 py-1.5 text-laya-secondary text-surface-400 hover:text-surface-200">Hide</button>
+					{/if}
 					<button onclick={openCorpus} class="rounded-md px-3 py-1.5 text-laya-secondary text-surface-400 hover:text-surface-200">Open Corpus</button>
 					<button
 						onclick={askAboutThese}
