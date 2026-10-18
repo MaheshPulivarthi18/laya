@@ -176,7 +176,7 @@ async def _create_api_key(base_url: str, cookies: dict) -> str | None:
         scopes = [
             "workflow:create", "workflow:read", "workflow:update",
             "workflow:delete", "workflow:list", "workflow:execute",
-            "credential:create", "credential:read",
+            "credential:create", "credential:read", "credential:update",
             "credential:delete", "credential:list",
         ]
 

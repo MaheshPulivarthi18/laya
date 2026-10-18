@@ -111,6 +111,27 @@ async def create_credential(
     return resp.json()
 
 
+async def update_credential(credential_id: str, data: dict) -> dict:
+    """PATCH /api/v1/credentials/{id} — merge ``data`` into a credential's data.
+
+    ``isPartialData`` makes n8n merge the given fields into the credential's
+    existing (decrypted) data, so fields not sent are kept. The n8n public API
+    has no endpoint that returns a credential's data, so this is the only way
+    to change one field of a credential without resending all of it. The API
+    key needs the ``credential:update`` scope; without it n8n answers 403.
+    """
+    resp = await _request(
+        "PATCH",
+        f"{_base_url()}/api/v1/credentials/{credential_id}",
+        headers=_get_headers(),
+        json={"data": data, "isPartialData": True},
+        timeout=10.0,
+    )
+    if resp.status_code != 200:
+        raise N8nApiError(resp.status_code, resp.text)
+    return resp.json()
+
+
 async def delete_credential(credential_id: str) -> bool:
     """DELETE /api/v1/credentials/{id} — delete a credential from n8n."""
     resp = await _request(

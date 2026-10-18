@@ -2700,3 +2700,101 @@ html, body {
 	.om-pulse { animation: none !important; }
 	.om-row, .om-item-pill, .om-chev { transition: none !important; }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   SETTINGS → INTEGRATIONS PANE
+   Colour roles for the master–detail Integrations tab. Defaults are the dark
+   glass surface; [data-theme='light'] and .integ-solid (glass theme off)
+   override them. t1–t4 are text roles from strongest to faintest; light mode
+   sets t3/t4 one step stronger than the inverted surface scale so muted text
+   keeps 4.5:1 contrast on cream.
+   ───────────────────────────────────────────────────────────── */
+@theme {
+	--color-integ-t1: oklch(0.920 0.010 64);
+	--color-integ-t2: oklch(0.840 0.011 62);
+	--color-integ-t3: oklch(0.630 0.013 58);
+	--color-integ-t4: oklch(0.540 0.012 56);
+	--color-integ-line: rgb(255 255 255 / 0.07);
+	--color-integ-fill: rgb(255 255 255 / 0.05);
+	--color-integ-fill-2: rgb(255 255 255 / 0.08);
+	--color-integ-skel: rgb(255 255 255 / 0.06);
+	--color-integ-ok-fg: #86efac;
+	--color-integ-err-fg: #fca5a5;
+	--color-integ-exp-fg: #fcd34d;
+	/* Dark text on laya-orange: white on orange fails contrast. */
+	--color-integ-on-accent: oklch(0.220 0.025 50);
+	--color-integ-accent-tint: oklch(0.775 0.130 63 / 0.16);
+	--color-integ-input-bg: rgb(255 255 255 / 0.05);
+	--color-integ-input-border: rgb(255 255 255 / 0.12);
+	--color-integ-scrim: rgb(0 0 0 / 0.55);
+	--color-integ-recess: rgb(0 0 0 / 0.10);
+	--color-integ-card: rgb(255 255 255 / 0.03);
+	--color-integ-modal: oklch(0.185 0.007 48);
+
+	/* Type scale, relative to the user's --laya-font-base (13px by default),
+	   so the pane follows the Appearance font-size setting. Names give the
+	   role; the comment gives the size at the default base. */
+	--text-integ-label: calc(var(--laya-font-base) - 2px);       /* 11px */
+	--text-integ-chip: calc(var(--laya-font-base) - 1.5px);      /* 11.5px */
+	--text-integ-small: calc(var(--laya-font-base) - 1px);       /* 12px */
+	--text-integ-note: calc(var(--laya-font-base) - 0.5px);      /* 12.5px */
+	--text-integ-body: var(--laya-font-base);                    /* 13px */
+	--text-integ-item: calc(var(--laya-font-base) + 0.5px);      /* 13.5px */
+	--text-integ-input: calc(var(--laya-font-base) + 1px);       /* 14px */
+	--text-integ-item-lg: calc(var(--laya-font-base) + 1.5px);   /* 14.5px */
+	--text-integ-name: calc(var(--laya-font-base) + 2px);        /* 15px */
+	--text-integ-title: calc(var(--laya-font-base) + 8px);       /* 21px */
+}
+
+[data-theme='light'] {
+	--color-integ-t1: oklch(0.310 0.017 48);
+	--color-integ-t2: oklch(0.410 0.016 53);
+	--color-integ-t3: oklch(0.490 0.014 58);
+	--color-integ-t4: oklch(0.560 0.012 60);
+	--color-integ-line: rgb(110 60 25 / 0.12);
+	--color-integ-fill: rgb(110 60 25 / 0.05);
+	--color-integ-fill-2: rgb(110 60 25 / 0.09);
+	--color-integ-skel: rgb(110 60 25 / 0.08);
+	--color-integ-ok-fg: #15803d;
+	--color-integ-err-fg: #b91c1c;
+	--color-integ-exp-fg: #b45309;
+	--color-integ-accent-tint: oklch(0.775 0.130 63 / 0.22);
+	--color-integ-input-bg: rgb(255 255 255 / 0.75);
+	--color-integ-input-border: rgb(110 60 25 / 0.18);
+	--color-integ-scrim: rgb(60 35 20 / 0.28);
+	--color-integ-recess: rgb(110 60 25 / 0.03);
+	--color-integ-card: rgb(255 255 255 / 0.55);
+	--color-integ-modal: oklch(0.990 0.003 78);
+}
+
+/* Solid surface (glass theme off): opaque list recess and cards. */
+.integ-solid {
+	--color-integ-recess: oklch(0.240 0.008 49);
+	--color-integ-card: oklch(0.225 0.008 49);
+}
+[data-theme='light'] .integ-solid {
+	--color-integ-recess: rgb(110 60 25 / 0.03);
+	--color-integ-card: var(--color-surface-900);
+}
+
+/* Loading skeleton pulse. Turned off by the reduced-motion setting and the
+   OS preference, like the other loops in the app. */
+@keyframes integ-pulse {
+	0%, 100% { opacity: 1; }
+	50%      { opacity: 0.55; }
+}
+.integ-pulse { animation: integ-pulse 1.6s ease-in-out infinite; }
+[data-reduced-motion] .integ-pulse { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+	.integ-pulse { animation: none !important; }
+}
+
+/* Connect modal on the glass surface. It keeps .glass-dropdown so the glass
+   input styling above applies to every form inside it (account name, OAuth
+   client, API keys, SMTP), and takes the opaque modal background on top of
+   it, so long forms stay readable over the pane. */
+.glass-dropdown.integ-modal { background: rgb(35 30 25 / 0.88); }
+[data-theme='light'] .glass-dropdown.integ-modal { background: rgb(255 255 255 / 0.88); }
+/* The glass input rule sets border-color with !important, so an invalid
+   field needs !important too to show its red border. */
+.integ-modal input[aria-invalid='true'] { border-color: rgb(239 68 68 / 0.6) !important; }

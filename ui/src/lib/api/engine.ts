@@ -1143,11 +1143,20 @@ export const engineApi = {
 	detectEmailProvider: (email: string) =>
 		request<EmailProviderDetection>(`/egress/connections/detect?email=${encodeURIComponent(email)}`),
 
-	startOAuthFlow: (platform: string, connectionName?: string, spaceId?: string, channelNames?: string[]) => {
+	/** Start an OAuth flow. With `connectionId`, the flow re-authorizes that
+	 *  existing connection in place instead of adding a new one. */
+	startOAuthFlow: (
+		platform: string,
+		connectionName?: string,
+		spaceId?: string,
+		channelNames?: string[],
+		connectionId?: string
+	) => {
 		const params = new URLSearchParams({ platform });
 		if (connectionName) params.set('connection_name', connectionName);
 		if (spaceId) params.set('space_id', spaceId);
 		if (channelNames && channelNames.length > 0) params.set('channel_names', channelNames.join(','));
+		if (connectionId) params.set('connection_id', connectionId);
 		return request<OAuthStartResponse>(`/egress/connections/oauth/start?${params}`);
 	},
 
