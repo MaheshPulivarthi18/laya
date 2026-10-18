@@ -428,6 +428,88 @@ CREATE INDEX idx_traces_created_at ON traces(created_at);
 CREATE INDEX idx_traces_query ON traces(query);
 ```
 
+Migration 074 adds `documents TEXT` (JSON array of Corpus documents matched by identifier only); documents linked to a cluster are stored inside `cluster_data`.
+
+### documents
+
+Corpus documents: files the user shared (migration 074). A document is a first-class content type, not a card or an event. The original file is read in place (`storage_mode='reference'`, `source_path`); only multipart uploads keep an engine-owned copy (`storage_mode='copy'`, `stored_path`).
+
+```sql
+CREATE TABLE documents (
+    document_id        TEXT PRIMARY KEY,         -- 'doc_' + 12 hex
+    space_id           TEXT NOT NULL DEFAULT 'default',
+    title              TEXT NOT NULL,
+    original_filename  TEXT NOT NULL,
+    file_type          TEXT NOT NULL,            -- pdf|docx|md|txt|csv|json|html
+    mime_type          TEXT,
+    storage_mode       TEXT NOT NULL DEFAULT 'reference',  -- reference | copy
+    source_path        TEXT,                     -- absolute path the user shared
+    source_mtime       REAL,                     -- st_mtime at ingest; change detection
+    stored_path        TEXT,                     -- engine-owned copy (copy mode only)
+    sha256             TEXT NOT NULL,
+    size_bytes         INTEGER NOT NULL,
+    page_count         INTEGER,
+    chunk_count        INTEGER NOT NULL DEFAULT 0,
+    char_count         INTEGER NOT NULL DEFAULT 0,
+    status             TEXT NOT NULL DEFAULT 'queued',  -- queued|parsing|chunking|embedding|linking|summarizing|ready|failed
+    error              TEXT,
+    error_code         TEXT,
+    summary            TEXT,                     -- map-reduce LLM summary (markdown)
+    summary_model      TEXT,
+    embedding_model    TEXT,                     -- chromadb_store backend key at embed time
+    language           TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    indexed_at         TEXT
+);
+
+CREATE INDEX idx_documents_space_created ON documents(space_id, created_at DESC);
+CREATE UNIQUE INDEX idx_documents_space_sha ON documents(space_id, sha256);
+CREATE INDEX idx_documents_status ON documents(status);
+```
+
+### document_chunks
+
+The extracted text, chunked page- and heading-aware. This is the source of truth for `documents_fts` and for re-embedding: `POST /documents/:id/reprocess?stage=embed` re-embeds from these rows without the original file.
+
+```sql
+CREATE TABLE document_chunks (
+    chunk_id     TEXT PRIMARY KEY,               -- '<document_id>_chunk_<index>', also the Chroma vector id
+    document_id  TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
+    chunk_index  INTEGER NOT NULL,
+    text         TEXT NOT NULL,
+    page_start   INTEGER,
+    page_end     INTEGER,
+    heading      TEXT,
+    char_count   INTEGER NOT NULL,
+    UNIQUE (document_id, chunk_index)
+);
+
+CREATE INDEX idx_document_chunks_doc ON document_chunks(document_id, chunk_index);
+```
+
+### document_entity_links
+
+Links from a document to the work items it mentions, keyed by the same `entity_id` as `action_cards.entity_id` / `entities.entity_id`. Methods: `identifier` (ticket key or PR number found in the text, confidence 1.0), `entity_ref` (identifier found in `entities.platform_refs`, 0.9), `mention` (canonical entity name in the text, 0.6).
+
+```sql
+CREATE TABLE document_entity_links (
+    document_id    TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
+    entity_id      TEXT NOT NULL,
+    link_method    TEXT NOT NULL,                -- identifier | entity_ref | mention
+    confidence     REAL NOT NULL DEFAULT 1.0,
+    mention_count  INTEGER NOT NULL DEFAULT 1,
+    first_page     INTEGER,
+    matched_text   TEXT,
+    created_at     TEXT NOT NULL,
+    PRIMARY KEY (document_id, entity_id)
+);
+
+CREATE INDEX idx_doc_entity_links_entity ON document_entity_links(entity_id);
+```
+
+Migration 074 also adds `chat_conversations.document_ids` (canonical sorted JSON of attached documents, like `card_ids`) and `chat_messages.referenced_documents` (JSON array of `[doc:ID]` citations, beside `referenced_cards` / `referenced_events`).
+
 ### egress_connections
 
 Configured platform connections for outbound actions.
@@ -596,7 +678,7 @@ CREATE TABLE metadata (
 
 > **Runtime-built — not a numbered migration.** These virtual tables are created at startup by `engine/laya/db/fts.py` (`ensure_fts_tables`, run after the migration runner) — there is no file for them under `migrations/`, so don't go looking for one. They are kept in sync with their base tables by SQL triggers, and existing rows are backfilled the first time each index is created.
 
-Two FTS5 virtual tables provide BM25-ranked lexical search alongside the ChromaDB vector index; the two are merged via Reciprocal Rank Fusion in chat and trace retrieval. If the SQLite build lacks the FTS5 module, retrieval degrades to `LIKE` and these tables are simply absent.
+Three FTS5 virtual tables provide BM25-ranked lexical search alongside the ChromaDB vector index; the two are merged via Reciprocal Rank Fusion in chat and trace retrieval. If the SQLite build lacks the FTS5 module, retrieval degrades to `LIKE` and these tables are simply absent.
 
 ```sql
 CREATE VIRTUAL TABLE cards_fts USING fts5(
@@ -610,7 +692,15 @@ CREATE VIRTUAL TABLE events_fts USING fts5(
     subject_title, content_body,
     tokenize = 'porter unicode61'
 );
+
+CREATE VIRTUAL TABLE documents_fts USING fts5(
+    chunk_id UNINDEXED, document_id UNINDEXED,
+    title, heading, text,
+    tokenize = 'porter unicode61'
+);
 ```
+
+`documents_fts` holds one row per Corpus chunk with the document title denormalised into every row (a title rename re-syncs them through a trigger on `documents`); the document search ranks with `bm25(documents_fts, 0, 0, 3.0, 2.0, 1.0)` so title and heading hits outrank body hits.
 
 `thread_context` is indexed so terse follow-up cards ("Approved.") stay findable by their thread's keywords ("Contextual BM25").
 
@@ -707,5 +797,9 @@ Migrations are numbered SQL files in `engine/laya/db/migrations/`. There are cur
 | `068` | **Contextual BM25**: `thread_context` column on action_cards (indexed by FTS5) |
 | `069` | Index on `processing_rule_firings.fired_at` for the firing-log query and retention prune |
 | `070` | **Agent budget**: agent_budget_state, agent_budget_paused_workflows, agent_rate_limit_state tables |
+| `071` | Normalize legacy `T`-separated timestamps to the canonical space-separated UTC format |
+| `072` | Omni `change_summary_json` for delta change tracking |
+| `073` | `workflow_update_error` on sources for per-clone n8n workflow push failures |
+| `074` | **Corpus documents**: documents, document_chunks, document_entity_links tables; `document_ids` on chat_conversations, `referenced_documents` on chat_messages, `documents` on traces |
 
 The migration runner (`engine/laya/db/migrate.py`) checks `schema_version` on startup and applies any migrations with version > current version.

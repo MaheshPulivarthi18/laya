@@ -83,6 +83,19 @@ Parameters that control how much context Laya's chat retrieves when answering qu
 | `chat_semantic_max_distance` | `0.60` | Maximum cosine distance for semantic search in chat context retrieval. **Lower** = more relevant but fewer results. |
 | `chat_context_items` | `12` | Maximum context items (cards, events, entities) included in the chat prompt. **Higher** = more context for the LLM but larger prompt cost. |
 
+## Corpus Documents
+
+These live under the top-level `documents` key in `settings.json` (not under `tuning`).
+
+| Setting | Default | Description |
+|---|---|---|
+| `documents.max_file_mb` | `50` | Largest file accepted by drop, picker (`POST /documents/from-path`) or upload (`POST /documents`). |
+| `documents.summary_window_chars` | `12000` | Characters of document text per map-summary LLM call (roughly 3K tokens). **Lower** = more, cheaper calls on small local windows. |
+| `documents.summary_max_windows` | `24` | Beyond this many windows the summary samples the document (first 12, last 6, 6 evenly from the middle) and notes that it did. |
+| `documents.embed_batch_size` | `8` | Chunks embedded per encoder call. Encoder memory grows with batch size times sequence length squared; **lower** this if embedding fails with an out-of-memory error. A failed slice is retried one chunk at a time before the document is marked failed. |
+
+Chat retrieval with documents attached uses 16 context items and a 3,500-token budget instead of `chat_context_items` and 2,000 tokens; the document vector search uses the same `chat_semantic_max_distance` gate.
+
 ## Router
 
 | Parameter | Default | Description |

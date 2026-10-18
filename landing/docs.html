@@ -80,6 +80,12 @@
         <a href="#doc-coherence-traces">Traces &amp; Narratives</a>
       </div>
       <div class="sidebar-section">
+        <div class="sidebar-title">Corpus</div>
+        <a href="#doc-corpus-overview">Documents</a>
+        <a href="#doc-corpus-adding">Adding Documents</a>
+        <a href="#doc-corpus-chat">Chat, Cards &amp; Coherence</a>
+      </div>
+      <div class="sidebar-section">
         <div class="sidebar-title">Context Association</div>
         <a href="#doc-context-overview">Semantic Grouping</a>
         <a href="#doc-context-learning">Learning Pipeline</a>
@@ -622,6 +628,46 @@ npm install --prefix ~/.laya/n8n_module n8n</code></pre>
       </ul>
       <p>Traces can be rerun to pick up new events, and exported as markdown reports.</p>
 
+      <!-- ─── CORPUS ─── -->
+      <h2 id="doc-corpus-overview">Corpus &mdash; Documents</h2>
+      <p>Corpus is the set of documents you have shared with Laya. Access it from the <strong>Corpus</strong> tab in the main navigation. Each document is parsed, split into chunks that remember their page and heading, embedded into the same local vector store as your cards, and indexed for keyword search &mdash; so chat, cards, and Coherence can all use it.</p>
+      <p>Supported formats: <strong>PDF</strong>, <strong>DOCX</strong>, <strong>Markdown</strong>, plain text, <strong>CSV</strong>, <strong>JSON</strong>, and <strong>HTML</strong>. Scanned (image-only) PDFs are rejected because OCR is not supported; password-protected PDFs are rejected too.</p>
+      <p>Files you share by dropping or picking them are <strong>read in place</strong>: Laya records the path, a content hash, and the modification time, and never copies or modifies the file. Only files uploaded from a browser (when the engine runs on another machine) keep a copy under <code>~/.laya/data/documents</code>. The extracted text and its embeddings are stored locally under <code>~/.laya/data</code>.</p>
+      <p>Every document belongs to a <strong>space</strong>. Chat in that space can retrieve it ambiently, and the Corpus page groups documents by space.</p>
+
+      <h3>The Corpus Page</h3>
+      <ul>
+        <li><strong>Status</strong> &mdash; queued, parsing, chunking, embedding, linking, summarising, ready, or failed, with a reason when something went wrong</li>
+        <li><strong>Summary</strong> &mdash; an AI-written overview (Overview, Key points, Decisions &amp; action items, Identifiers) generated at ingest</li>
+        <li><strong>Source state</strong> &mdash; a file that changed on disk shows <em>Changed on disk</em> with a <strong>Re-sync</strong> action; a file that moved shows <em>Source moved</em> with a <strong>Locate</strong> action. The document keeps working from the indexed text either way</li>
+        <li><strong>Select and ask</strong> &mdash; tick one or more documents and press <strong>Ask</strong> to open a chat focused on just those</li>
+        <li><strong>Open</strong> a document to read its extracted text chunk by chunk with page markers, see the work items it mentions, rename, reprocess, re-summarise, or delete it</li>
+      </ul>
+
+      <h2 id="doc-corpus-adding">Adding Documents</h2>
+      <ol>
+        <li><strong>Drop anywhere</strong> &mdash; drag a file (or several) onto any page of the app. A sheet opens with one tile per file and a space picker when you have more than one space.</li>
+        <li><strong>Add button</strong> &mdash; on the Corpus page, press <strong>Add</strong> to pick files.</li>
+        <li><strong>Chat composer</strong> &mdash; the paperclip lists ready documents to attach, and <strong>Add file</strong> shares a new one and attaches it in one step. A file dropped while a conversation is open attaches to that conversation.</li>
+      </ol>
+      <p>Processing runs on the engine in the background. A banner under the title bar shows the current document and progress; press <strong>Details</strong> to reopen the tiles. You can keep working, close the sheet, or navigate away &mdash; the banner reports when the batch has finished. The same file added twice to one space is reported as a duplicate and the existing document is used.</p>
+      <p>Each stage of ingest is:</p>
+      <ol>
+        <li><strong>Parsing</strong> &mdash; text is extracted per page (PDF) or per heading (DOCX, Markdown, HTML)</li>
+        <li><strong>Chunking</strong> &mdash; sentences are packed into overlapping chunks that never cross a heading and carry their page range</li>
+        <li><strong>Embedding</strong> &mdash; chunks are embedded locally, in small batches, into the shared vector store</li>
+        <li><strong>Linking</strong> &mdash; ticket keys and PR numbers (<code>PROJ-123</code>, <code>PR #540</code>) and known entity names are matched to your cards and entities</li>
+        <li><strong>Summarising</strong> &mdash; a map-reduce LLM summary is written; very long documents are sampled and the summary says so. This is the only step that calls an LLM, and a failure here leaves the document searchable</li>
+      </ol>
+
+      <h2 id="doc-corpus-chat">Chat, Cards &amp; Coherence</h2>
+      <p><strong>Ask generally.</strong> Open chat and ask. Document chunks are retrieved alongside cards and events and fused with the same hybrid (vector + BM25) ranking.</p>
+      <p><strong>Ask specifically.</strong> Select documents on the Corpus page and press <strong>Ask</strong>, use <strong>Ask about this</strong> on an open document, or attach from the chat composer. Attached documents appear as chips above the message box, are saved on the conversation, focus retrieval on those files, and pin their summaries into the model's context. Conversations with attachments show a document count in the conversation list.</p>
+      <p><strong>Citations.</strong> Replies cite documents as <code>[doc:ID p.N]</code>, rendered as a link that opens the document on the Corpus page at that page. The chat model can also call <code>list_documents</code>, <code>search_documents</code>, and <code>read_document</code> to look deeper; the same three tools are available to external agents over MCP under the <em>read</em> scope.</p>
+      <p><strong>Cards.</strong> A card whose ticket or PR a document mentions shows it under <strong>Related documents</strong> in the card detail panel.</p>
+      <p><strong>Coherence.</strong> Trace clusters list the documents linked to their entities, and a query such as <code>trace PR-540</code> also surfaces documents that mention <code>PR-540</code> even when no card does.</p>
+      <p><strong>Privacy.</strong> Extracted document text is sent to the LLM and embedding providers you configure, the same way event content is. With self-hosted models nothing leaves your machine.</p>
+
       <!-- ─── CONTEXT ASSOCIATION ─── -->
       <h2 id="doc-context-overview">Context Association &mdash; Semantic Grouping</h2>
       <p>Context association automatically links related cards across different platforms and entity types. When a new card is emitted, Laya searches for semantically similar existing cards and groups them together if they belong to the same real-world context.</p>
@@ -743,6 +789,7 @@ npm install --prefix ~/.laya/n8n_module n8n</code></pre>
         <tr><td><strong>Chat</strong></td><td>Conversational responses in chat interface</td><td>Use a conversational model</td></tr>
         <tr><td><strong>Coherence</strong></td><td>Cross-platform entity search and narrative generation</td><td>Use a capable model</td></tr>
       </table>
+      <p>Corpus document summaries use the <strong>Stager</strong> model (including any per-space override) unless a <code>document_summary</code> model is set in <code>settings.json</code> under <code>models</code>.</p>
 
       <h3>Supported Cloud Providers</h3>
       <table>
@@ -941,7 +988,7 @@ content.body         content.metadata.*</code></pre>
       <p>Track and control LLM spending under <strong>Settings &rarr; Budget</strong> or the <strong>Dashboard</strong>.</p>
       <table>
         <tr><th>Feature</th><th>Description</th></tr>
-        <tr><td><strong>Feature breakdown</strong></td><td>Costs grouped by feature: Pulse, Coherence, Omni, Chat, Briefing, Egress, System</td></tr>
+        <tr><td><strong>Feature breakdown</strong></td><td>Costs grouped by feature: Pulse, Coherence, Omni, Chat, Corpus, Briefing, Egress, System</td></tr>
         <tr><td><strong>Step breakdown</strong></td><td>Expandable per-feature cost details: Routing, Entity Resolution, Context Learning, Stager, Trace, etc.</td></tr>
         <tr><td><strong>Monthly history</strong></td><td>Monthly cost aggregation with trend tracking</td></tr>
         <tr><td><strong>Monthly cap</strong></td><td>Set a maximum monthly spend. When exceeded, Laya pauses AI processing and notifies you.</td></tr>
@@ -1132,6 +1179,9 @@ EOF
         <tr><td><code>chat.md</code></td><td>Chat</td><td>Conversational chat system prompt</td></tr>
         <tr><td><code>chat_title.md</code></td><td>Chat</td><td>Conversation title generation</td></tr>
         <tr><td><code>chat_polish.md</code></td><td>Chat</td><td>Message polish/refinement</td></tr>
+        <tr><td><code>chat_documents.md</code></td><td>Chat</td><td>Corpus instructions added to the chat system prompt when documents exist (citation syntax, document tools)</td></tr>
+        <tr><td><code>document_summary_map.md</code></td><td>Corpus</td><td>Summarises one section of a document at ingest (JSON output)</td></tr>
+        <tr><td><code>document_summary_reduce.md</code></td><td>Corpus</td><td>Merges section summaries into the document summary (JSON output)</td></tr>
         <tr><td><code>learner.md</code></td><td>Learning</td><td>Extracts classification rules from user corrections</td></tr>
         <tr><td><code>context_learner.md</code></td><td>Learning</td><td>Extracts grouping rules from link/unlink actions</td></tr>
         <tr><td><code>trace_narrative.md</code></td><td>Coherence</td><td>Generates narrative summaries for entity traces</td></tr>
@@ -1290,6 +1340,17 @@ EOF
         <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
         <tr><td><code>chat_semantic_max_distance</code></td><td>0.60</td><td>Max cosine distance for semantic search in chat context.</td></tr>
         <tr><td><code>chat_context_items</code></td><td>12</td><td>Max context items (cards, events, entities) included in the chat prompt.</td></tr>
+      </table>
+      <p>With Corpus documents attached to a conversation the chat retrieves up to 16 items within a 3,500-token budget instead of 12 items and 2,000 tokens.</p>
+
+      <h3>Corpus Documents</h3>
+      <p>These live under the top-level <code>documents</code> key in <code>settings.json</code>, not under <code>tuning</code>.</p>
+      <table>
+        <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>max_file_mb</code></td><td>50</td><td>Largest file accepted by drop, picker, or upload.</td></tr>
+        <tr><td><code>summary_window_chars</code></td><td>12000</td><td>Characters of document text per map-summary LLM call.</td></tr>
+        <tr><td><code>summary_max_windows</code></td><td>24</td><td>Beyond this many windows the summary samples the document (first 12, last 6, 6 from the middle) and says so.</td></tr>
+        <tr><td><code>embed_batch_size</code></td><td>8</td><td>Chunks embedded per encoder call. Lower this if embedding runs out of memory on your GPU.</td></tr>
       </table>
 
       <h3>Router &amp; Feedback</h3>

@@ -151,3 +151,17 @@ Every architectural and design decision made during the planning phase, with rat
 | 83 | **Lenient max_tokens with auto-clamp** | `DEFAULT_MAX_TOKENS` raised to 65536 (a ceiling, not a target) to stop JSON-schema truncation on verbose local models, then auto-clamped down to each model's advertised output ceiling so the high default never trips a 400 on strict providers (vLLM/OpenAI/Anthropic). |
 | 84 | **Processing-rule firing log** | Every processing-rule firing is recorded in `processing_rule_firings` with its actions, per-action results, and error; queryable/searchable by outcome (success/error/skipped) to make rule effectiveness and failures visible. |
 | 85 | **Card created_at = event time** | `action_cards.created_at` (and group active time) hold the source event's platform timestamp rather than insert time, so late-ingested cards show their real time. True ingest time remains on `events.created_at`. Forward-only; no backfill. |
+
+## Phase 14: Corpus (Oct 2026)
+
+| # | Decision | Rationale |
+|---|---|---|
+| 86 | **Documents are a first-class content type, not cards or events** | A shared file has no platform event behind it and no action to approve, so it gets its own tables (`documents`, `document_chunks`, `document_entity_links`), its own FTS table and its own `content_type` values in the shared Chroma collection. No feed card is created on ingest; an opt-in "extract actions" path through the briefing-style synthetic event is left for later. |
+| 87 | **Files are referenced, never copied** | A drop or picker selection records the path, sha256 and mtime and the engine reads the file in place; everything the feature serves (chat, search, citations, related cards) comes from SQLite and Chroma, so a moved or deleted original leaves the document usable. Only browser multipart uploads keep a copy, because a remote engine cannot read the user's path. |
+| 88 | **Card-only filter on every existing Chroma reader** | Six readers assumed every vector is a card. They now pass `CARD_CONTENT_FILTER` (`content_type $nin` the document types) so document chunks never surface as cards; this landed before the first document vector was written. |
+| 89 | **Chunk text lives in SQLite** | There is no re-embed routine for cards, but documents need one (embedding model switch, GPU failure mid-batch). Keeping every chunk in `document_chunks` makes `reprocess?stage=embed` a read-and-upsert with no parsing and no LLM call. |
+| 90 | **Pure-Python parsers with bounded pins** | `pypdf` and `mammoth` only. No PyMuPDF (AGPL), no docling or unstructured (model stacks), no `lxml` (native wheel outside the lock set). Scanned PDFs are rejected rather than OCRed. |
+| 91 | **Corpus is a peer of Pulse, Omni and Coherence** | The UI name, route (`/corpus`) and component folder use Corpus; engine code, tables, API paths, tool names and WebSocket messages say `documents`, the way the Pulse route is `feed` in code. |
+| 92 | **Background ingest with a banner, not a modal** | Processing runs on the engine and each stage broadcasts `document_updated`; the add sheet only hides on close, and a banner under the title bar carries the batch (current document, progress, done count) so the user keeps working. |
+| 93 | **Embedding hardened against GPU out-of-memory** | A slice that fails as a batch is retried one vector at a time, the default batch is 8, and no chunk exceeds 3,000 characters, after a 32-chunk batch of long sequences exhausted an Apple-silicon GPU. |
+

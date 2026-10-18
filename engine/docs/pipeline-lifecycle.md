@@ -123,18 +123,41 @@ flowchart TD
 ```mermaid
 flowchart TD
     MSG[/"User sends message"/]
-    MSG --> CTX_FETCH["Hybrid context retrieval<br/>(ChromaDB + SQL)"]
+    MSG --> CTX_FETCH["Hybrid context retrieval<br/>(ChromaDB + SQL FTS5:<br/>cards, events, entities,<br/>Corpus document chunks)"]
     CTX_FETCH --> HISTORY["Load chat history<br/>(last 10 messages)"]
     HISTORY --> BUILD["Build messages:<br/>system + history + user + context"]
 
     BUILD --> CHAT_LLM["🧠 Chat LLM (streaming)<br/><b>prompts/chat.py</b><br/>role=chat | temp=0.3<br/>tools ✓ (all read/write/egress)"]
 
-    CHAT_LLM -->|tool_call| TOOL_EXEC["Execute tool<br/>(search_cards, get_event,<br/>dismiss_card, egress, ...)"]
+    CHAT_LLM -->|tool_call| TOOL_EXEC["Execute tool<br/>(search_cards, get_event,<br/>search_documents, read_document,<br/>dismiss_card, egress, ...)"]
     TOOL_EXEC -->|result| CHAT_LLM
     CHAT_LLM -->|"no more tools<br/>(max 20 iterations)"| RESPONSE["Final response<br/>streamed to user"]
 
     MSG -.->|"background<br/>(first msg only)"| TITLE["🧠 Title Generation<br/><b>prompts/chat.py</b><br/>role=router | temp=0.3"]
 ```
+
+## Corpus Document Ingest (User-Initiated)
+
+```mermaid
+flowchart TD
+    DROP[/"File dropped, picked or uploaded"/]
+    DROP --> CREATE["Create document row<br/><i>validate type + size, sha256,<br/>dedupe per space, record path + mtime</i>"]
+    CREATE --> PARSE["Parse<br/><i>documents/parsers (no LLM)</i>"]
+    PARSE --> CHUNK["Chunk<br/><i>page/heading aware, max 3000 chars</i>"]
+    CHUNK --> EMBED["Embed<br/><i>batches of 8 into laya_memory<br/>content_type=document_chunk</i>"]
+    EMBED --> LINK["Link<br/><i>identifiers + entity names -> document_entity_links</i>"]
+    LINK --> BUDGET{budget paused?}
+    BUDGET -->|yes| READY
+    BUDGET -->|no| MAP["🧠 Summary map (per window)<br/><b>prompts/document_summary.py</b><br/>role=stager (or document_summary) | temp=0.2<br/>structured output ✓ | ≤2 in flight"]
+    MAP --> REDUCE["🧠 Summary reduce<br/><b>prompts/document_summary.py</b><br/>role=stager (or document_summary) | temp=0.2<br/>structured output ✓ | hierarchical by 8"]
+    REDUCE --> SUMVEC["Embed summary<br/>content_type=document_summary"]
+    SUMVEC --> READY["status=ready<br/><i>every transition broadcasts document_updated</i>"]
+    PARSE -->|no text / encrypted| FAIL([failed])
+    EMBED -->|encoder error after single retries| FAIL
+    MAP -.->|LLM error| READY
+```
+
+Parsing and chunking failures are fatal; a summary failure records `error_code=summary_error` on a document that is still `ready` and searchable. `POST /documents/{id}/reprocess?stage=embed|summarize|link` re-runs one stage from the stored chunks.
 
 ## Learning Pipelines (Feedback-Driven)
 
@@ -190,6 +213,7 @@ graph LR
     subgraph USER_DRIVEN["User-Driven"]
         CH["Chat<br/>chat · 0.3 · tools"]
         TR["Trace<br/>trace · 0.3 · streaming"]
+        DOC["Corpus Summary<br/>stager · 0.2 · map-reduce"]
     end
 
     S -.-> GS & DS & OQ

@@ -76,12 +76,12 @@ External Services (Jira, Bitbucket, Slack, Gmail, Calendar)
 |  |  |  | Staged Outputs | |                 |  |               |   |  |  |
 |  |  |  +----------------+ +-----------------+  +---------------+   |  |  |
 |  |  |                                                              |  |  |
-|  |  |  +- Omni ----------+                                         |  |  |
-|  |  |  | Rolling cross-  |                                         |  |  |
-|  |  |  | platform        |                                         |  |  |
-|  |  |  | summary, pins,  |                                         |  |  |
-|  |  |  | time-travel     |                                         |  |  |
-|  |  |  +-----------------+                                         |  |  |
+|  |  |  +- Omni ----------+   +- Corpus --------+                   |  |  |
+|  |  |  | Rolling cross-  |   | Shared docs:    |                   |  |  |
+|  |  |  | platform        |   | parsed, chunked,|                   |  |  |
+|  |  |  | summary, pins,  |   | embedded; chat  |                   |  |  |
+|  |  |  | time-travel     |   | cites pages     |                   |  |  |
+|  |  |  +-----------------+   +-----------------+                   |  |  |
 |  |  |                                                              |  |  |
 |  |  |  +- Settings -----+                                          |  |  |
 |  |  |  | Models, keys,  |                                          |  |  |
@@ -112,6 +112,7 @@ External Services (Jira, Bitbucket, Slack, Gmail, Calendar)
 |  |  |  GET  /health          (health check)                      |  |    |
 |  |  |  CRUD /settings        (configuration)                     |  |    |
 |  |  |  GET  /omni            (rolling cross-platform summary)    |  |    |
+|  |  |  CRUD /documents       (Corpus: share, list, read, delete) |  |    |
 |  |  +------------------------------------------------------------+  |    |
 |  |                                                                  |    |
 |  |  +- Asyncio Pipeline -----------------------------------------+  |    |
@@ -175,6 +176,7 @@ External Services (Jira, Bitbucket, Slack, Gmail, Calendar)
 |  |   GitHub        |   | classif_*     |   |                   |         |
 |  |   Linear        |   | context_*     |   |                   |         |
 |  |                 |   | omni_*        |   |                   |         |
+|  |                 |   | documents*    |   | (+ Corpus chunks) |         |
 |  |                 |   | audit_log     |   |                   |         |
 |  |                 |   +---------------+   +-------------------+         |
 |  | Execution:      |                                                     |
@@ -343,11 +345,14 @@ PARSE INTENT (fast LLM)
        |
        v
 RETRIEVE CONTEXT (hybrid: vector + lexical, merged via RRF)
-  - memory_search (ChromaDB) for semantic matches
+  - memory_search (ChromaDB) for semantic matches (card vectors only)
   - FTS5/BM25 keyword search over cards_fts / events_fts
   - event_lookup (SQLite) for structured data
   - card_history (SQLite) for related Action Cards
   - entity_lookup (SQLite) for cross-platform refs
+  - Corpus document chunks: vector (content_type=document_chunk)
+    + BM25 over documents_fts, restricted to attached documents
+    when the conversation has any; replies cite [doc:ID p.N]
        |
        v
 RESPOND (strong LLM)
@@ -452,6 +457,46 @@ UI displays updated Omni view
   - Pin/unpin items
   - Drill-down to source cards (Insight view)
 ```
+
+### Corpus Pipeline (Documents)
+
+Corpus brings the user's own files into the same retrieval stack as cards
+and events. See `engine/docs/corpus-documents.md` for the full design.
+
+```
+File dropped on the window / picked on the Corpus page / uploaded
+       |
+       v
+CREATE DOCUMENT ROW (documents/ingest.py)
+  - Validate extension + size, sha256, dedupe per space
+  - Reference mode: record path + mtime, read the file IN PLACE
+    (never copied); multipart uploads keep a copy instead
+  - status=queued, tracked asyncio task per document
+       |
+       v
+PARSE  -> CHUNK -> EMBED -> LINK -> SUMMARIZE -> READY
+  - parsers/: one PARSER per format (pdf, docx, md, txt, csv, json, html)
+  - chunking: sentence packing that keeps page range + heading,
+    never crosses a heading, max 3000 chars per chunk
+  - embed: batches of 8 into laya_memory as content_type=document_chunk
+    (one document at a time; a failed slice retried one chunk at a time)
+  - link: PROJ-123 / PR #540 identifiers and entity names ->
+    document_entity_links (same entity_id as cards)
+  - summarize: map-reduce LLM summary (only LLM step; non-fatal)
+  - every transition broadcasts document_updated over /ws
+       |
+       v
+Consumers
+  - Chat: chunks fused with cards/events via RRF; attachments per
+    conversation; list/search/read_document tools (also over MCP)
+  - Cards: GET /cards/{id}/related-documents via entity links
+  - Coherence: TraceCluster.documents from the cluster's entities
+  - Corpus page: status, summary, source state (changed on disk ->
+    re-sync; moved -> relocate), select-and-ask
+```
+
+Every pre-existing Chroma reader that assumes a hit is a card filters
+with `CARD_CONTENT_FILTER`, so document vectors never surface as cards.
 
 ### Classification Learning
 

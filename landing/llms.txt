@@ -22,6 +22,7 @@ Events flow through: Ingest → Space Resolution → Rules → Router (fast LLM 
 - **6 AI Personas**: Engineer, Comms, Ops, Sales, HR, Finance — each with specialized processing
 - **Coherence**: Cross-platform entity search using hybrid retrieval — dense vectors (ChromaDB) + lexical BM25 (SQLite FTS5) + entity search merged via Reciprocal Rank Fusion, with AI-generated narratives
 - **Omni**: Rolling cross-platform summary with four temporal layers (Attention, Recent, Period, Milestone) and progressive summarization
+- **Corpus**: User-shared documents (PDF, DOCX, Markdown, text, CSV, JSON, HTML) parsed, chunked, embedded, and indexed locally in the same retrieval stack as events; files are read in place, never copied. Chat answers with page-level citations, cards show related documents, Coherence traces include them, and list/search/read document tools are exposed over MCP
 - **Context Association**: Automatic semantic grouping of related cards across platforms; learns editable natural-language context rules from user corrections (auto-consolidated by an LLM)
 - **Coding Agents**: Run Claude Code, Gemini CLI, Codex, Pi CLI, or Cursor Agent directly from any card with a dedicated workspace
 - **Agent inference backends**: Run any pipeline stage on an installed CLI agent's own quota via `agent/<id>/<model>` model ids (native schema enforcement on Claude Code; best-effort + retry on others)
@@ -29,7 +30,7 @@ Events flow through: Ingest → Space Resolution → Rules → Router (fast LLM 
 - **Composer**: Cross-platform outbound actions from a single interface (9 platform backends, plus a direct SMTP backend)
 - **Daily Briefings**: Synthesized morning briefing with events, action items, and key updates
 - **Spaces**: User-defined contexts with per-space model configs, API keys, and event routing
-- **Chat**: Hybrid (vector + BM25) search across all ingested events with RAG-powered retrieval; can also create/edit filter, classification, and processing rules
+- **Chat**: Hybrid (vector + BM25) search across all ingested events and Corpus documents with RAG-powered retrieval; documents can be attached to a conversation to focus it; can also create/edit filter, classification, and processing rules
 - **Smart Classification & Rules**: Multi-model pipeline that learns from corrections; user-authored filter and processing rules with optional AI-evaluated conditions and a searchable firing log
 - **Budget Tracking**: LLM cost monitoring by feature and pipeline step with monthly caps; plus window-based usage budgets for agent inference backends
 - **Self-Hosted & On-Prem**: Cloud and self-hosted instances (Bitbucket Server / Data Center, GitHub Enterprise) via a per-repo host field
