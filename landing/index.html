@@ -395,6 +395,19 @@
               tell the complete story.</p>
           </div>
           <div class="feature-card animate-on-scroll">
+            <div class="feature-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f6ac69"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                <path d="M14 3v5h5" stroke="#ff9770" />
+                <path d="M9 13h6" />
+                <path d="M9 17h6" />
+              </svg></div>
+            <h3>Corpus</h3>
+            <p>Drop a PDF, DOCX, Markdown, or spreadsheet anywhere in the app and it joins your local knowledge base.
+              Chat answers from it with page-level citations, cards link to the documents that mention them, and the
+              file itself is read in place — never copied, never uploaded.</p>
+          </div>
+          <div class="feature-card animate-on-scroll">
             <div class="feature-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff9770"
                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="22" y1="2" x2="11" y2="13" />
@@ -452,7 +465,7 @@
                 <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
               </svg></div>
             <h3>Budget Tracking</h3>
-            <p>Monitor LLM costs broken down by feature (Pulse, Omni, Chat, Coherence) and pipeline step. Set monthly
+            <p>Monitor LLM costs broken down by feature (Pulse, Omni, Chat, Coherence, Corpus) and pipeline step. Set monthly
               spending caps with automatic pause when limits are reached.</p>
           </div>
           <div class="feature-card animate-on-scroll">
@@ -813,6 +826,47 @@
           <div class="feature-image">
             <img src="images/coherence-view.webp" width="1515" height="989" loading="lazy" decoding="async"
               alt="Laya Coherence — trace entities across platforms with AI-generated narratives">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════ CORPUS ═══════════════════ -->
+    <section>
+      <div class="container">
+        <div class="feature-showcase animate-on-scroll">
+          <div class="feature-text">
+            <span class="tag">Corpus</span>
+            <h2>Your documents, in the same memory as your events</h2>
+            <p>Corpus lets you hand Laya the files your work actually lives in — specs, contracts, handbooks, reports.
+              Drop one anywhere in the window and it is parsed, chunked, embedded, and indexed on your machine, next to
+              every card and event Laya already knows about.</p>
+            <ul>
+              <li><span class="check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f6ac69"
+                    stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></span> PDF, DOCX, Markdown, text, CSV, JSON, and HTML — read in place, never copied</li>
+              <li><span class="check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f6ac69"
+                    stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></span> Chat cites pages: ask a question, follow the link to the exact passage</li>
+              <li><span class="check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f6ac69"
+                    stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></span> Select documents and ask about just those, or attach them from the chat composer</li>
+              <li><span class="check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f6ac69"
+                    stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></span> Cards show the documents that mention their ticket or PR; Coherence traces include them</li>
+              <li><span class="check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f6ac69"
+                    stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></span> AI summary written at ingest; the same read tools are exposed to agents over MCP</li>
+            </ul>
+          </div>
+          <div class="feature-image">
+            <img src="images/corpus-view.webp" width="1357" height="890" loading="lazy" decoding="async"
+              alt="Laya Corpus — documents you shared, indexed locally with summaries and page counts">
           </div>
         </div>
       </div>

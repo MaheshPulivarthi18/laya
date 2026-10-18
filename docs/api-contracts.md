@@ -566,17 +566,31 @@ Alternative to WebSocket for chat (for simple request/response).
 **Request:**
 ```json
 {
-  "message": "What happened with BUG-1234?"
+  "message": "What happened with BUG-1234?",
+  "conversation_id": null,
+  "document_ids": ["doc_e84627117c63"]
 }
 ```
+
+`document_ids` (optional) attaches Corpus documents to the conversation: a list replaces the stored attachment (an empty list detaches), omitting it keeps whatever is stored. The same field is accepted on the WebSocket `chat_message` payload.
 
 **Response (200):**
 ```json
 {
-  "response": "BUG-1234 is an NPE in PaymentService. I staged a fix 5 minutes ago -- see card #card_001 in your feed. The fix adds null-safety checks for customer ID. The PR is ready for your approval.",
+  "response": "BUG-1234 is an NPE in PaymentService. I staged a fix 5 minutes ago -- see card #card_001 in your feed. The fix adds null-safety checks for customer ID. The PR is ready for your approval. The rollout plan is in [doc:doc_e84627117c63 p.3].",
   "referenced_cards": ["card_001"],
-  "referenced_events": ["evt_a1b2c3d4"]
+  "referenced_events": ["evt_a1b2c3d4"],
+  "referenced_documents": ["doc_e84627117c63"]
 }
+```
+
+### `PUT /chat/conversations/:conversation_id/documents`
+
+Replace the Corpus documents attached to a conversation. Unknown ids are dropped. `GET /chat/conversations` returns `document_ids` on every conversation.
+
+**Request:**
+```json
+{ "document_ids": ["doc_e84627117c63", "doc_28328e819ff4"] }
 ```
 
 ### `POST /cards/:card_id/bookmark`
@@ -682,6 +696,74 @@ Export a trace as markdown.
 ```
 Content-Type: text/markdown
 ```
+
+Trace responses also carry Corpus documents: each cluster has `documents` (documents linked to the cluster's entities) and the trace has a top-level `documents` list for identifier-only matches. Each entry is `{document_id, title, file_type, page_count, link_method, confidence, entity_ids, first_page}`.
+
+### Corpus documents
+
+All routes take the engine bearer token. The engine reads a shared file in place and never writes to it; only `POST /documents` keeps a copy.
+
+| Method and path | Purpose |
+|---|---|
+| `POST /documents/from-path` | Share a file by path (`{path, space_id, title?}`). The file is hashed where it is; `storage_mode=reference`. 404 when the path is not a readable file. |
+| `POST /documents` | Multipart upload (`file`, `space_id`, `title?`); the engine keeps a copy (`storage_mode=copy`). For browsers and remote engines. |
+| `GET /documents` | `space_id?, status?, q?, limit, offset` -> `{documents, total}` |
+| `GET /documents/supported-types` | `{extensions, max_file_mb}` |
+| `GET /documents/by-entity?entity_id=` | Ready documents linked to an entity, with `link_method`, `confidence`, `first_page` |
+| `GET /documents/:id` | Full document with `summary` and `entity_links` |
+| `GET /documents/:id/chunks` | `page_from?, page_to?, offset, limit` -> `{chunks, total}` |
+| `GET /documents/:id/related` | `{entities, cards}` for the document's links |
+| `GET /cards/:card_id/related-documents` | Documents linked to the card's entity |
+| `PATCH /documents/:id` | `{title}` rename |
+| `POST /documents/:id/reprocess?stage=all\|embed\|summarize\|link` | Re-run stages; `all` re-reads the file (409 `source_missing` when it is gone), the others work from the stored chunks |
+| `POST /documents/:id/resync` | Re-ingest a reference document whose file changed on disk; `{status: "unchanged"}` when the hash still matches |
+| `POST /documents/:id/relocate` | `{path}` points a reference document at a moved file after verifying its hash (409 on mismatch) |
+| `DELETE /documents/:id` | Delete rows, index entries and vectors; a referenced source file is never touched |
+
+Both create routes return `202` with a `DocumentResponse`; `409` carries `{detail: {message, error_code: "duplicate", document_id}}` for a file already in the space, `413` for the size cap and `415` for an unsupported type.
+
+**DocumentResponse:**
+```json
+{
+  "document_id": "doc_e84627117c63",
+  "space_id": "default",
+  "title": "Q3 Roadmap",
+  "original_filename": "roadmap.pdf",
+  "file_type": "pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 1249,
+  "page_count": 2,
+  "chunk_count": 1,
+  "char_count": 480,
+  "storage_mode": "reference",
+  "source_path": "/Users/me/Documents/roadmap.pdf",
+  "source_state": "ok",
+  "status": "ready",
+  "error": null,
+  "error_code": null,
+  "summary": "## Overview ...",
+  "summary_model": "anthropic/claude-sonnet-4-6",
+  "embedding_model": "mpnet",
+  "needs_reembed": false,
+  "created_at": "2026-10-17 12:00:11",
+  "updated_at": "2026-10-17 12:00:24",
+  "indexed_at": "2026-10-17 12:00:24",
+  "entity_links": [
+    {"entity_id": "jira:ticket:PAY-42", "link_method": "identifier", "confidence": 1.0, "mention_count": 1, "first_page": 1, "matched_text": "PAY-42", "card_count": 3}
+  ]
+}
+```
+
+`status` moves through `queued -> parsing -> chunking -> embedding -> linking -> summarizing -> ready` (or `failed`). `error_code` is one of `no_text`, `encrypted`, `unsupported`, `too_large`, `parse_error`, `embed_error`, `summary_error`, `summary_skipped_budget`, `interrupted`, `source_missing`; the last three can appear on a document that is still `ready`. `source_state` is `copy`, `ok`, `changed` or `missing`.
+
+**WebSocket messages:**
+```json
+{"type": "document_updated", "document_id": "doc_...", "space_id": "default", "status": "embedding",
+ "title": "Q3 Roadmap", "progress": {"stage": "embedding", "done": 64, "total": 210}, "error": null, "error_code": null}
+{"type": "document_deleted", "document_id": "doc_...", "space_id": "default"}
+```
+
+**Chat and MCP tools:** `list_documents`, `search_documents(query, document_id?, limit)` and `read_document(document_id, page_from?, page_to?, chunk_from?, chunk_to?, max_chars)` are read-scope tools, shipped to the chat model when the space holds documents or the turn mentions one.
 
 ### `POST /egress/execute`
 

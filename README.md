@@ -56,10 +56,11 @@ Your Tools (Jira, Slack, Gmail, Bitbucket, Calendar)
 - **Cross-platform memory:** Entity resolution links "BUG-1234" in Jira to "PR-891" in Bitbucket to "the payment bug" in Slack
 - **Daily Briefing:** Morning summary of overnight activity, pending cards, and today's calendar with context
 - **Analytics Dashboard:** Track events processed, time saved, LLM costs (broken down by feature and pipeline step), throughput over time, and approval rates
-- **Budget Tracking:** Monitor LLM costs by feature (Pulse, Omni, Chat, Coherence) with monthly caps and automatic pause when limits are reached. When running on agent inference backends, a separate window-based usage budget pauses ingestion as an agent's rolling quota nears its limit and auto-resumes when the window resets
-- **Chat sidebar:** Ask Laya questions about your events, projects, and context — and create, edit, or delete filter/classification/processing rules directly from the conversation
-- **Hybrid search:** Chat and Coherence retrieval combine local vector search (ChromaDB) with lexical BM25 ranking over SQLite FTS5 (`cards_fts`/`events_fts`), merged via Reciprocal Rank Fusion, so both semantic and exact-keyword matches surface
+- **Budget Tracking:** Monitor LLM costs by feature (Pulse, Omni, Chat, Coherence, Corpus) with monthly caps and automatic pause when limits are reached. When running on agent inference backends, a separate window-based usage budget pauses ingestion as an agent's rolling quota nears its limit and auto-resumes when the window resets
+- **Chat sidebar:** Ask Laya questions about your events, projects, context, and Corpus documents — and create, edit, or delete filter/classification/processing rules directly from the conversation
+- **Hybrid search:** Chat and Coherence retrieval combine local vector search (ChromaDB) with lexical BM25 ranking over SQLite FTS5 (`cards_fts`/`events_fts`/`documents_fts`), merged via Reciprocal Rank Fusion, so both semantic and exact-keyword matches surface
 - **Coherence:** Cross-platform entity search traces any person, ticket, or PR across all platforms using hybrid local search, with AI-generated narratives
+- **Corpus:** Drop a PDF, DOCX, Markdown, text, CSV, JSON, or HTML file anywhere in the app and Laya parses, chunks, embeds, and indexes it locally. Chat answers from your documents with page-level citations, cards show the documents that mention their ticket or PR, Coherence traces include linked documents, and the same read tools are exposed over MCP. Files are read in place — never copied — and an AI summary is written at ingest
 - **Egress:** Execute outbound actions (emails, Slack messages, PR comments) directly from Laya with preview-before-send
 - **Omni:** Rolling cross-platform summary that answers "where am I right now?" with four temporal layers (Attention, Recent, Period, Milestone) and progressive AI compression
 - **Bookmarks:** Pin important cards for quick access regardless of date or status
@@ -93,9 +94,10 @@ laya/
 │   ├── laya/
 │   │   ├── main.py          # Entry point (uvicorn server on :8420)
 │   │   ├── config.py        # Settings, paths, agent detection
-│   │   ├── api/             # REST + WebSocket endpoints (27 routers)
-│   │   ├── db/              # SQLite (+ FTS5) + ChromaDB + 70 migrations
+│   │   ├── api/             # REST + WebSocket endpoints (28 routers)
+│   │   ├── db/              # SQLite (+ FTS5) + ChromaDB + 74 migrations
 │   │   ├── pipeline/        # Event processing (ingest → route → stage → emit → trace → learn → context_learn → omni)
+│   │   ├── documents/       # Corpus: parsers, chunking, ingest, entity linking, summary, search
 │   │   ├── llm/             # LiteLLM client, agent inference backends, prompts, tools
 │   │   ├── agents/          # Coding agent adapters (Claude, Gemini, Codex, Pi, Cursor)
 │   │   ├── workers/         # Multi-persona LLM workers (engineer, comms, ops, sales, hr, finance)
@@ -108,7 +110,7 @@ laya/
 │
 ├── ui/                      # SvelteKit + Tauri desktop app
 │   ├── src/                 # Svelte 5 frontend (runes syntax)
-│   │   ├── routes/          # Pages (feed, coherence, dashboard, settings, workspace, omni)
+│   │   ├── routes/          # Pages (feed, omni, coherence, corpus, dashboard, settings, workspace)
 │   │   ├── lib/             # Components, API client, stores
 │   │   ├── app.css          # Tailwind v4 + theme system
 │   │   └── app.html
@@ -425,7 +427,7 @@ Apply changes without restarting from **Settings → Models → Custom Prompts �
 curl -X POST -H "Authorization: Bearer $LAYA_ENGINE_TOKEN" http://127.0.0.1:8420/prompts/reload
 ```
 
-Available prompt files: `router.md`, `stager.md`, `omni.md`, `group_summary_initial.md`, `group_summary_rolling.md`, `briefing.md`, `summarizer.md`, `summarizer_status_change.md`, `engineer.md`, `comms.md`, `sales.md`, `hr.md`, `ops.md`, `finance.md`, `chat.md`, `chat_title.md`, `chat_polish.md`, `learner.md`, `context_learner.md`, `trace_narrative.md`, `trace_summary.md`, `trace_filter.md`.
+Available prompt files: `router.md`, `stager.md`, `omni.md`, `group_summary_initial.md`, `group_summary_rolling.md`, `briefing.md`, `summarizer.md`, `summarizer_status_change.md`, `engineer.md`, `comms.md`, `sales.md`, `hr.md`, `ops.md`, `finance.md`, `chat.md`, `chat_title.md`, `chat_polish.md`, `chat_documents.md`, `document_summary_map.md`, `document_summary_reduce.md`, `learner.md`, `context_learner.md`, `trace_narrative.md`, `trace_summary.md`, `trace_filter.md`.
 
 Custom prompts fully replace the built-in default for that stage. If a file is deleted, the hardcoded default is used automatically. The engine never creates or modifies files in this directory. Use `GET /prompts` (with the same bearer header) to check which prompts are currently overridden.
 

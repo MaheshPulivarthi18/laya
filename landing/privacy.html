@@ -46,7 +46,7 @@
     </ul>
 
     <h2>3. Data Sent to Third-Party LLM Providers</h2>
-    <p>To classify events, generate action suggestions, power chat, and compute semantic embeddings, Laya transmits portions of your professional data to the LLM and embedding providers you configure. The data transmitted may include email content, messages, issue descriptions, PR diffs, calendar details, team member information, and any content you enter in chat or workspace interfaces.</p>
+    <p>To classify events, generate action suggestions, power chat, and compute semantic embeddings, Laya transmits portions of your professional data to the LLM and embedding providers you configure. The data transmitted may include email content, messages, issue descriptions, PR diffs, calendar details, team member information, text extracted from documents you add to the Corpus, and any content you enter in chat or workspace interfaces. Documents shared by drop or file picker are read in place and never copied or modified; their extracted text and embeddings are stored locally under <code>~/.laya/data</code>.</p>
     <p><strong>You choose which providers receive your data.</strong> Laya supports fully local models (Ollama, LM Studio, any OpenAI-compatible local endpoint) where no data leaves your machine. If you configure cloud providers (Anthropic, OpenAI, Google, OpenRouter), your data is subject to those providers' privacy policies and data-processing terms.</p>
     <div class="callout callout-info">
       <p><strong>Local-first recommended.</strong> When using self-hosted models, your data does not leave your machine or local network via Laya. This is the recommended configuration for sensitive data.</p>

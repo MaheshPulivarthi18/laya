@@ -36,6 +36,7 @@ laya/
 |   |   |   |-- tags_api.py               # Tag CRUD, assign/unassign, tags-for-target
 |   |   |   |-- metadata_api.py           # Generic key/value metadata store (per-space)
 |   |   |   |-- trace_api.py              # Coherence entity search, traces, narratives
+|   |   |   |-- documents_api.py          # Corpus documents: share by path/upload, list, chunks, related, reprocess, resync, relocate, delete
 |   |   |   |-- egress_api.py             # Outbound action execution, preview, connections
 |   |   |   |-- omni_api.py              # Omni rolling summary: snapshots, pins, resynthesis
 |   |   |   |-- budget_api.py             # $ budget + agent usage-limit budget, cost controls
@@ -67,7 +68,7 @@ laya/
 |   |   |   |-- omni.py                   # Omni: rolling summary, incremental updates, resynthesis
 |   |   |   |-- budget.py                 # LLM cost tracking by feature and pipeline step
 |   |   |   |-- agent_budget.py           # Agent inference-backend usage limits (window-based pause/resume)
-|   |   |   |-- chat.py                   # Chat assistant pipeline
+|   |   |   |-- chat.py                   # Chat assistant pipeline (cards + events + Corpus document retrieval)
 |   |   |   |-- workers.py                # Multi-persona LLM workers (6 personas)
 |   |   |   |-- space_resolution.py       # Space/source identification
 |   |   |   |-- feedback.py               # Learning loop (approval pattern tracking)
@@ -94,12 +95,21 @@ laya/
 |   |   |   |-- cursor_cli.py             # Cursor Agent CLI adapter
 |   |   |   |-- session_manager.py        # Manages active sessions across cards
 |   |   |
+|   |   |-- documents/                    # Corpus: user-shared documents in the retrieval stack
+|   |   |   |-- store.py                  # SQL helpers for documents / document_chunks / document_entity_links
+|   |   |   |-- ingest.py                 # Lifecycle: create (path or upload), parse -> chunk -> embed -> link -> summarize, reprocess, resync, relocate, delete
+|   |   |   |-- chunking.py               # Page/heading-aware chunking over db/chunking.chunk_segments
+|   |   |   |-- linking.py                # Identifier (PROJ-123, PR #540) and entity-name linking
+|   |   |   |-- summary.py                # Map-reduce LLM summary at ingest
+|   |   |   |-- search.py                 # Hybrid chunk search (vector + documents_fts, RRF) for chat and tools
+|   |   |   |-- parsers/                  # One PARSER per format: pdf, docx, markdown, text, csv_, json_, html
+|   |   |
 |   |   |-- llm/                          # LLM interaction layer
 |   |   |   |-- __init__.py
 |   |   |   |-- client.py                 # LiteLLM wrapper with model selection, retries, space overrides
 |   |   |   |-- agent_backend.py          # Drive CLI agents (Claude Code/Codex/Gemini/Pi) as inference backends
 |   |   |   |-- providers.py              # Custom model provider management
-|   |   |   |-- prompts/                  # Prompt templates (router, stager, engineer, comms, ops, finance, hr, sales, omni, research, group_summary, context_learner, context_rule_consolidator, etc.)
+|   |   |   |-- prompts/                  # Prompt templates (router, stager, engineer, comms, ops, finance, hr, sales, omni, research, group_summary, document_summary, context_learner, context_rule_consolidator, etc.)
 |   |   |   |-- tools/                    # MCP tool definitions
 |   |   |       |-- definitions.py        # Tool schemas
 |   |   |       |-- card_tools.py         # Card query tools
@@ -108,6 +118,7 @@ laya/
 |   |   |       |-- entity_tools.py       # Entity lookup/link tools
 |   |   |       |-- event_tools.py        # Event query tools
 |   |   |       |-- search_tools.py       # Memory/semantic search tools
+|   |   |       |-- document_tools.py     # Corpus: list_documents, search_documents, read_document (read scope, also over MCP)
 |   |   |       |-- settings_tools.py     # Settings management tools
 |   |   |       |-- rules_tools.py        # Chat-driven CRUD for filter/classification/processing rules
 |   |   |       |-- executor.py           # Tool execution
@@ -121,10 +132,10 @@ laya/
 |   |   |   |-- __init__.py
 |   |   |   |-- sqlite.py                 # Async SQLite connection (WAL mode, foreign keys)
 |   |   |   |-- chromadb_store.py         # ChromaDB vector store (embedded PersistentClient)
-|   |   |   |-- fts.py                    # SQLite FTS5 virtual tables (cards_fts, events_fts) + BM25 query builder
-|   |   |   |-- chunking.py              # Document chunking for embeddings
+|   |   |   |-- fts.py                    # SQLite FTS5 virtual tables (cards_fts, events_fts, documents_fts) + BM25 query builder
+|   |   |   |-- chunking.py              # Sentence chunking for embeddings (chunk_text, tagged chunk_segments)
 |   |   |   |-- migrate.py               # Migration runner (check version, apply pending)
-|   |   |   |-- migrations/              # 70 numbered SQL migration files
+|   |   |   |-- migrations/              # 74 numbered SQL migration files
 |   |   |       |-- 001_initial.sql       # Core tables: events, action_cards, action_log
 |   |   |       |-- 002_entities.sql      # Entity resolution: entities table
 |   |   |       |-- ...
@@ -138,6 +149,8 @@ laya/
 |   |   |       |-- 035_traces_fuzzy.sql  # Fuzzy search optimization
 |   |   |       |-- ...
 |   |   |       |-- 044_manual_retries.sql    # Dead event manual retry counter
+|   |   |       |-- ...
+|   |   |       |-- 074_documents.sql     # Corpus: documents, document_chunks, document_entity_links
 |   |   |       |-- 045_context_groups.sql    # Context groups, members tables
 |   |   |       |-- 046_context_learning.sql  # Context corrections + rules tables
 |   |   |       |-- ...
@@ -163,7 +176,8 @@ laya/
 |   |   |   |-- event.py                  # LayaEvent model
 |   |   |   |-- card.py                   # ActionCard model
 |   |   |   |-- workspace.py              # WorkspaceSession, WorkspaceEvent models
-|   |   |   |-- trace.py                  # TraceEntity, TraceCluster, TraceChapter models
+|   |   |   |-- trace.py                  # TraceEntity, TraceCluster, TraceChapter, TraceDocumentRef models
+|   |   |   |-- document.py               # DocumentResponse, DocumentChunk, DocumentEntityLink
 |   |   |   |-- omni.py                   # OmniItem, OmniSection, OmniSnapshot, OmniPin, OmniStats
 |   |   |   |-- ...                       # Additional models (action, classification, etc.)
 |   |   |
@@ -227,7 +241,9 @@ laya/
 |   |   |
 |   |   |-- lib/
 |   |   |   |-- stores/                   # Svelte stores (reactive state)
-|   |   |   |   |-- chat.ts               # Chat message history
+|   |   |   |   |-- chat.ts               # Chat message history, card/document anchoring, askAboutDocuments
+|   |   |   |   |-- documents.ts          # Corpus document list + ingest progress (document_updated WS reducer)
+|   |   |   |   |-- corpusSheet.ts        # "Add to Corpus" sheet tiles and batch activity summary
 |   |   |   |   |-- compose.ts            # Compose modal state (platform, action, prefill)
 |   |   |   |   |-- feedFilters.ts        # Feed filter state (includes search-all-days mode)
 |   |   |   |   |-- feedSelection.ts      # Selected card state (for bulk actions)
@@ -250,6 +266,7 @@ laya/
 |   |   |       |                         #   GroupSummaryDetail, BulkActionsDropdown, StatusDot
 |   |   |       |-- workspace/            # AgentPanel, TimelinePanel, ContextPanel
 |   |   |       |-- trace/                # TraceCard, TraceHeader, TraceTimeline, TraceSearch, etc.
+|   |   |       |-- corpus/               # AddDocumentSheet, CorpusBanner, CorpusList, DocumentView
 |   |   |       |-- omni/                # OmniView, OmniHeader, OmniItem
 |   |   |       |-- egress/               # ComposeModal, InlineEditor, ConfirmAction, QuickActions
 |   |   |       |-- dashboard/            # StatCard, FeatureCostChart, charts, analytics components
@@ -271,6 +288,8 @@ laya/
 |   |       |       |-- +page.svelte      # Omni drill-down: card panels + contextual chat
 |   |       |-- coherence/
 |   |       |   |-- +page.svelte          # Coherence: entity search & trace viewer
+|   |       |-- corpus/
+|   |       |   |-- +page.svelte          # Corpus: shared documents list, select-and-ask, document view (?doc=ID&page=N)
 |   |       |-- dashboard/
 |   |       |   |-- +page.svelte          # Analytics dashboard
 |   |       |-- workspace/
