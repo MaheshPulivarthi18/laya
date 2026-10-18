@@ -468,7 +468,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{
-    menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{TrayIcon, TrayIconBuilder},
     Manager,
 };
@@ -863,8 +863,15 @@ pub fn run() {
                 }
             }
 
-            // Custom app menu with About metadata including GitHub URL
+            // Native app menu (macOS only). macOS shows it in the global menu
+            // bar. Linux and Windows run an undecorated window with the web
+            // title bar in Titlebar.svelte, and an app menu there is drawn as a
+            // menu bar strip above the webview, so they get no app menu.
+            // Clipboard shortcuts work in the webview without one.
+            #[cfg(target_os = "macos")]
             {
+                use tauri::menu::{AboutMetadata, Submenu};
+
                 let pkg_info = app.package_info().clone();
                 let about_metadata = AboutMetadata {
                     name: Some(pkg_info.name.clone()),
@@ -877,7 +884,6 @@ pub fn run() {
 
                 let handle = app.handle();
 
-                #[cfg(target_os = "macos")]
                 let app_submenu = Submenu::with_items(
                     handle,
                     &pkg_info.name,
@@ -892,14 +898,6 @@ pub fn run() {
                         &PredefinedMenuItem::separator(handle)?,
                         &PredefinedMenuItem::quit(handle, None)?,
                     ],
-                )?;
-
-                #[cfg(not(target_os = "macos"))]
-                let help_menu = Submenu::with_items(
-                    handle,
-                    "Help",
-                    true,
-                    &[&PredefinedMenuItem::about(handle, None, Some(about_metadata))?],
                 )?;
 
                 let edit_menu = Submenu::with_items(
@@ -924,13 +922,11 @@ pub fn run() {
                     &[
                         &PredefinedMenuItem::minimize(handle, None)?,
                         &PredefinedMenuItem::maximize(handle, None)?,
-                        #[cfg(target_os = "macos")]
                         &PredefinedMenuItem::separator(handle)?,
                         &PredefinedMenuItem::close_window(handle, None)?,
                     ],
                 )?;
 
-                #[cfg(target_os = "macos")]
                 let view_menu = Submenu::with_items(
                     handle,
                     "View",
@@ -941,31 +937,16 @@ pub fn run() {
                 let menu = Menu::with_items(
                     handle,
                     &[
-                        #[cfg(target_os = "macos")]
                         &app_submenu,
-                        #[cfg(not(any(
-                            target_os = "linux",
-                            target_os = "dragonfly",
-                            target_os = "freebsd",
-                            target_os = "netbsd",
-                            target_os = "openbsd"
-                        )))]
                         &Submenu::with_items(
                             handle,
                             "File",
                             true,
-                            &[
-                                &PredefinedMenuItem::close_window(handle, None)?,
-                                #[cfg(not(target_os = "macos"))]
-                                &PredefinedMenuItem::quit(handle, None)?,
-                            ],
+                            &[&PredefinedMenuItem::close_window(handle, None)?],
                         )?,
                         &edit_menu,
-                        #[cfg(target_os = "macos")]
                         &view_menu,
                         &window_menu,
-                        #[cfg(not(target_os = "macos"))]
-                        &help_menu,
                     ],
                 )?;
 
@@ -976,7 +957,6 @@ pub fn run() {
                 // only when our "Window" submenu is registered as NSApp.windowsMenu.
                 // Without this, none of those items appear. Requires muda >= 0.17.2 —
                 // 0.17.1's impl points setWindowsMenu at a detached NSMenu (tauri#13605).
-                #[cfg(target_os = "macos")]
                 window_menu.set_as_windows_menu_for_nsapp()?;
             }
 
