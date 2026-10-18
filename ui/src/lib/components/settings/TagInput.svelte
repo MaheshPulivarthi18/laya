@@ -6,10 +6,15 @@
 	let {
 		tags = $bindable<string[]>([]),
 		placeholder = '',
+		variant = 'default',
 		onchange
 	}: {
 		tags?: string[];
 		placeholder?: string;
+		/** 'accent': an always-focused look with an orange border and ring and
+		 *  monospace `#channel` chips, used by the Integrations account card.
+		 *  It drops the help line below the box. */
+		variant?: 'default' | 'accent';
 		onchange?: (tags: string[]) => void;
 	} = $props();
 
@@ -58,14 +63,20 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="flex min-h-[38px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-lg px-3 py-2 text-sm
-		{$glassTheme ? 'glass-input' : 'border border-surface-600 bg-surface-700 focus-within:border-laya-orange/50 focus-within:ring-1 focus-within:ring-laya-orange/30'}"
+	class="flex w-full cursor-text flex-wrap items-center gap-1.5
+		{variant === 'accent'
+			? 'rounded-lg border border-laya-orange bg-integ-input-bg px-2 py-[7px] ring-[3px] ring-integ-accent-tint'
+			: $glassTheme
+				? 'glass-input min-h-[38px] rounded-lg px-3 py-2 text-sm'
+				: 'min-h-[38px] rounded-lg border border-surface-600 bg-surface-700 px-3 py-2 text-sm focus-within:border-laya-orange/50 focus-within:ring-1 focus-within:ring-laya-orange/30'}"
 	onclick={focusInput}
 >
 	{#each tags as tag, i}
-		<span class="inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2.5 pr-1 text-xs text-surface-200
-			{$glassTheme ? 'bg-white/[0.12]' : 'bg-surface-600'}">
-			{tag}
+		<span class="inline-flex items-center gap-0.5
+			{variant === 'accent'
+				? 'rounded-[5px] bg-integ-fill-2 py-[3px] pl-2 pr-1 font-mono text-integ-small text-integ-t1'
+				: `rounded-full py-0.5 pl-2.5 pr-1 text-xs text-surface-200 ${$glassTheme ? 'bg-white/[0.12]' : 'bg-surface-600'}`}">
+			{variant === 'accent' ? `#${tag}` : tag}
 			<button
 				type="button"
 				class="ml-0.5 rounded-full p-0.5 text-surface-400 hover:text-surface-200
@@ -83,10 +94,14 @@
 		bind:this={inputEl}
 		bind:value={inputValue}
 		{placeholder}
-		class="min-w-[120px] flex-1 border-none bg-transparent text-sm text-surface-100 outline-none
-			{$glassTheme ? 'placeholder:text-surface-400' : 'placeholder:text-surface-500'}"
+		class="min-w-[120px] flex-1 border-none bg-transparent outline-none
+			{variant === 'accent'
+				? 'px-0.5 py-[3px] font-mono text-integ-small text-integ-t1 placeholder:text-integ-t4'
+				: `text-sm text-surface-100 ${$glassTheme ? 'placeholder:text-surface-400' : 'placeholder:text-surface-500'}`}"
 		onkeydown={handleKeydown}
 		oninput={handleInput}
 	/>
 </div>
-<span class="mt-1 block text-xs text-surface-500">Separate channel names with a comma</span>
+{#if variant === 'default'}
+	<span class="mt-1 block text-xs text-surface-500">Separate channel names with a comma</span>
+{/if}

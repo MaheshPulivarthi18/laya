@@ -94,7 +94,16 @@ async def _run_health_checks() -> None:
         # Check OAuth token expiry
         if platform in ("gmail", "calendar", "outlook", "outlook_calendar"):
             refreshed = await _check_oauth_token(connection_id, platform)
-            if refreshed:
+            from laya.egress.oauth import get_n8n_sync_error
+
+            sync_error = get_n8n_sync_error(connection_id)
+            if refreshed and sync_error:
+                # The engine's token works but n8n's credential is stale, so the
+                # n8n ingestion workflows fail on their own refresh. Show the
+                # connection as broken instead of healthy.
+                new_status = "error"
+                error_msg = sync_error
+            elif refreshed:
                 new_status = "connected"
                 error_msg = None
             else:

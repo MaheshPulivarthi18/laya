@@ -864,13 +864,29 @@ async def oauth_start(
     connection_name: str | None = None,
     space_id: str | None = None,
     channel_names: str | None = None,
+    connection_id: str | None = None,
 ) -> dict:
     """Start an OAuth flow for a platform (Gmail, Google Calendar, Outlook, Slack).
 
     Returns the authorization URL to redirect the user's browser to.
-    Requires OAuth client credentials to be configured first.
+    Requires OAuth client credentials to be configured first. With
+    ``connection_id``, the flow re-authorizes that existing connection in place
+    (same id, name, space and workflows) instead of adding a new one.
     """
     from laya.egress.oauth import build_auth_url
+
+    if connection_id:
+        from laya.db.sqlite import get_db
+
+        db = await get_db()
+        rows = await db.execute_fetchall(
+            "SELECT 1 FROM egress_connections WHERE connection_id = ? AND platform = ?",
+            (connection_id, platform),
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404, detail=f"No {platform} connection {connection_id}",
+            )
 
     redirect_uri = f"http://localhost:{ENGINE_PORT}/egress/connections/oauth/callback"
     result = build_auth_url(
@@ -878,6 +894,7 @@ async def oauth_start(
         connection_name=connection_name,
         space_id=space_id,
         channel_names=channel_names,
+        connection_id=connection_id,
     )
 
     if "error" in result:
@@ -950,7 +967,11 @@ async def oauth_setup(body: dict) -> dict:
     Body: {"platform": "gmail", "client_id": "...", "client_secret": "..."}
     This must be done before starting an OAuth flow.
     """
-    from laya.egress.oauth import OAUTH_PROVIDERS, store_oauth_client
+    from laya.egress.oauth import (
+        OAUTH_PROVIDERS,
+        apply_client_to_connections,
+        store_oauth_client,
+    )
 
     platform = body.get("platform")
     client_id = body.get("client_id")
@@ -966,5 +987,7 @@ async def oauth_setup(body: dict) -> dict:
     success = store_oauth_client(platform, client_id, client_secret)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to store OAuth credentials")
+
+    await apply_client_to_connections(platform, client_id, client_secret)
 
     return {"status": "stored", "platform": platform}

@@ -4,6 +4,7 @@
 import { writable, derived } from 'svelte/store';
 import { engineApi } from '$lib/api/engine';
 import type { EgressConnection } from '$lib/api/types';
+import { platformHealth } from '$lib/utils/integrationHealth';
 
 /** Count of egress connections in a non-connected state ('error' | 'expired')
  *  — e.g. failed credential validation or a dead OAuth grant.
@@ -18,9 +19,11 @@ export const integrationErrors = writable(0);
  *  Integrations tab label and (with audit failures) the Settings nav icon. */
 export const hasIntegrationErrors = derived(integrationErrors, ($n) => $n > 0);
 
-/** Re-seed from an already-fetched connections list (Integrations tab load). */
+/** Re-seed from an already-fetched connections list (Integrations tab load).
+ *  Uses the same `platformHealth` count as the Integrations list badges, so
+ *  the tab dot and the badges always agree. */
 export function setIntegrationErrorsFromConnections(connections: EgressConnection[]) {
-	integrationErrors.set(connections.filter((c) => c.status !== 'connected').length);
+	integrationErrors.set(platformHealth(connections).nBad);
 }
 
 /** Fetch the authoritative count. Used for the startup seed and on

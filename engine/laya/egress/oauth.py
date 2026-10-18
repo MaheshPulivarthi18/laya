@@ -22,6 +22,7 @@ import structlog
 
 from laya.egress.connections import (
     EGRESS_KEYCHAIN_SERVICE,
+    _get_from_keychain,
     _provision_to_n8n,
     _store_in_keychain,
 )
@@ -179,8 +180,12 @@ def build_auth_url(
     connection_name: str | None = None,
     space_id: str | None = None,
     channel_names: str | None = None,
+    connection_id: str | None = None,
 ) -> dict:
     """Build the OAuth authorization URL for a platform.
+
+    With ``connection_id``, the callback re-authorizes that existing connection
+    instead of creating a new one.
 
     Returns:
         {"auth_url": "https://...", "state": "..."} on success
@@ -212,6 +217,7 @@ def build_auth_url(
         "connection_name": connection_name,
         "space_id": space_id,
         "channel_names": channel_names,
+        "connection_id": connection_id,
     }
     _cleanup_expired_states()
 
@@ -318,26 +324,23 @@ async def handle_callback(
         token_data["scope"] = authed.get("scope", "")
 
     access_token = token_data.get("access_token")
-    refresh_token = token_data.get("refresh_token")
-    expires_in = token_data.get("expires_in", 3600)
 
     if not access_token:
         return {"error": "No access_token in token response"}
+
+    if state_data.get("connection_id"):
+        return await _reauthorize_connection(
+            state_data["connection_id"], platform, provider["n8n_type"],
+            client_id, client_secret, token_data,
+        )
 
     # Store tokens in keychain
     import uuid
 
     connection_id = f"conn_{uuid.uuid4().hex[:12]}"
-    token_store = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "expires_in": expires_in,
-        "obtained_at": time.time(),
-        "client_id": client_id,
-        "client_secret": client_secret,
-    }
-
-    _store_in_keychain(connection_id, platform, token_store)
+    _store_in_keychain(
+        connection_id, platform, _token_store(token_data, client_id, client_secret),
+    )
 
     # Provision to n8n as OAuth credential
     all_errors: list[str] = []
@@ -418,6 +421,102 @@ async def handle_callback(
         "connection_id": connection_id,
         "platform": platform,
         "capabilities": capabilities,
+        "error_message": error_message,
+    }
+
+
+def _token_store(token_data: dict, client_id: str, client_secret: str) -> dict:
+    """Build the keychain entry for an OAuth connection from a token response."""
+    return {
+        "access_token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "expires_in": token_data.get("expires_in", 3600),
+        "obtained_at": time.time(),
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+
+
+async def _reauthorize_connection(
+    connection_id: str,
+    platform: str,
+    n8n_type: str,
+    client_id: str,
+    client_secret: str,
+    token_data: dict,
+) -> dict:
+    """Put fresh tokens on an existing connection, keeping its id, name, space and workflows.
+
+    The keychain entry is overwritten and the connection's n8n credential is
+    updated in place, so the cloned workflows that reference it keep working
+    without being rebound. A connection whose n8n credential was never created
+    gets one now, along with its workflows, the same way a new connection does.
+    """
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        """SELECT name, n8n_credential_id, space_id, capabilities
+           FROM egress_connections WHERE connection_id = ? AND platform = ?""",
+        (connection_id, platform),
+    )
+    if not rows:
+        return {"error": f"Connection {connection_id} not found for {platform}"}
+    row = rows[0]
+
+    _store_in_keychain(connection_id, platform, _token_store(token_data, client_id, client_secret))
+
+    n8n_cred_id = row["n8n_credential_id"]
+    error_message: str | None = None
+    if n8n_cred_id:
+        synced = await _sync_n8n_credential(
+            connection_id,
+            n8n_cred_id,
+            {
+                "clientId": client_id,
+                "clientSecret": client_secret or "",
+                "oauthTokenData": _n8n_oauth_token_data(token_data),
+            },
+        )
+        if not synced:
+            error_message = get_n8n_sync_error(connection_id)
+    else:
+        n8n_cred_id = await _provision_oauth_to_n8n(
+            platform, n8n_type, client_id, client_secret, token_data
+        )
+        if not n8n_cred_id:
+            error_message = f"Failed to create n8n credential for {platform}"
+        else:
+            from laya.egress.connections import _clone_workflows_for_connection
+
+            _, workflow_errors = await _clone_workflows_for_connection(
+                platform, connection_id, row["name"] or platform.title(), n8n_cred_id,
+                space_id=row["space_id"],
+            )
+            if workflow_errors:
+                error_message = "; ".join(workflow_errors)
+
+    status = "error" if error_message else "connected"
+    now = db_now()
+    await db.execute(
+        """UPDATE egress_connections
+           SET status = ?, error_message = ?, n8n_credential_id = ?,
+               last_validated_at = COALESCE(?, last_validated_at), updated_at = ?
+           WHERE connection_id = ?""",
+        (
+            status, error_message, n8n_cred_id,
+            now if status == "connected" else None, now,
+            connection_id,
+        ),
+    )
+    await db.commit()
+
+    log.info("oauth_connection_reauthorized", platform=platform,
+             connection_id=connection_id, status=status)
+
+    return {
+        "status": status,
+        "connection_id": connection_id,
+        "platform": platform,
+        "capabilities": json.loads(row["capabilities"] or "[]"),
         "error_message": error_message,
     }
 
@@ -526,10 +625,67 @@ async def refresh_access_token(connection_id: str, platform: str) -> bool:
         (connection_id,),
     )
     if rows and rows[0]["n8n_credential_id"]:
-        await _update_n8n_oauth_token(rows[0]["n8n_credential_id"], new_access_token)
+        oauth_token_data = _n8n_oauth_token_data({
+            **new_tokens,
+            "refresh_token": token_store["refresh_token"],
+        })
+        await _sync_n8n_credential(
+            connection_id,
+            rows[0]["n8n_credential_id"],
+            {
+                "clientId": client_id,
+                "clientSecret": client_secret or "",
+                "oauthTokenData": oauth_token_data,
+            },
+        )
 
     log.info("oauth_token_refreshed", platform=platform, connection_id=connection_id)
     return True
+
+
+async def apply_client_to_connections(platform: str, client_id: str, client_secret: str) -> None:
+    """Give existing connections of ``platform`` the OAuth client just saved in Settings.
+
+    Each connection refreshes with the client stored in its own keychain entry
+    at connect time, and its n8n credential holds the same client. When the
+    saved client has the same client_id (a rotated secret), the new secret is
+    written to both places so refreshes keep working. Connections made with a
+    different client_id are left alone: the provider ties each refresh token to
+    the client that issued it, so they keep refreshing with their own client.
+    """
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT connection_id, n8n_credential_id FROM egress_connections WHERE platform = ?",
+        (platform,),
+    )
+    for row in rows:
+        connection_id = row["connection_id"]
+        token_store = _get_from_keychain(connection_id, platform)
+        if not token_store or token_store.get("client_id") != client_id:
+            continue
+        if token_store.get("client_secret") == client_secret:
+            continue
+        token_store["client_secret"] = client_secret
+        _store_in_keychain(connection_id, platform, token_store)
+        if row["n8n_credential_id"]:
+            await _sync_n8n_credential(
+                connection_id,
+                row["n8n_credential_id"],
+                {"clientId": client_id, "clientSecret": client_secret or ""},
+            )
+
+
+# Connections whose last n8n credential update failed, mapped to the error to
+# show for them. The health monitor reads this so a connection whose engine
+# token refresh works, but whose n8n credential is stale, is not reported as
+# healthy. An entry is removed when a later update succeeds. The map is
+# in-memory: after a restart it fills again on the next failed update.
+_n8n_sync_errors: dict[str, str] = {}
+
+
+def get_n8n_sync_error(connection_id: str) -> str | None:
+    """Return the error from the connection's last failed n8n credential update, if any."""
+    return _n8n_sync_errors.get(connection_id)
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +712,17 @@ def _decode_user_email_from_token(token_data: dict) -> str:
     return ""
 
 
+def _n8n_oauth_token_data(token_data: dict) -> dict:
+    """Build the ``oauthTokenData`` field of an n8n OAuth credential from a token response."""
+    return {
+        "access_token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "expires_in": token_data.get("expires_in", 3600),
+        "token_type": token_data.get("token_type", "Bearer"),
+        "scope": token_data.get("scope", ""),
+    }
+
+
 async def _provision_oauth_to_n8n(
     platform: str,
     n8n_type: str,
@@ -567,13 +734,7 @@ async def _provision_oauth_to_n8n(
     try:
         from laya.integrations.n8n_client import create_credential
 
-        oauth_token_data = {
-            "access_token": token_data.get("access_token"),
-            "refresh_token": token_data.get("refresh_token"),
-            "expires_in": token_data.get("expires_in", 3600),
-            "token_type": token_data.get("token_type", "Bearer"),
-            "scope": token_data.get("scope", ""),
-        }
+        oauth_token_data = _n8n_oauth_token_data(token_data)
 
         # n8n expects OAuth credentials with specific structure
         # Base oAuth2Api schema requires serverUrl + additionalBody fields
@@ -616,36 +777,31 @@ async def _provision_oauth_to_n8n(
         return None
 
 
-async def _update_n8n_oauth_token(n8n_credential_id: str, new_access_token: str) -> None:
-    """Update an existing n8n credential's access token after refresh."""
+async def _sync_n8n_credential(connection_id: str, n8n_credential_id: str, data: dict) -> bool:
+    """Merge ``data`` into the connection's n8n OAuth credential.
+
+    n8n refreshes OAuth tokens on its own with the client and refresh token in
+    its credential, so the credential must carry the same client and tokens as
+    the engine's keychain entry. A failure is logged and recorded for the
+    health monitor; it does not fail the caller.
+    """
+    from laya.integrations.n8n_client import N8nApiError, N8nApiKeyMissing, update_credential
+
     try:
-        from laya.integrations.n8n_client import _get_headers
-        from laya.http_client import get_client
-        from laya.config import get_n8n_config
-
-        n8n_config = get_n8n_config()
-        base_url = n8n_config["base_url"].rstrip("/")
-        url = f"{base_url}/api/v1/credentials/{n8n_credential_id}"
-
-        # Fetch current credential to update only the token
-        client = get_client()
-        headers = _get_headers()
-        resp = await client.get(url, headers=headers, timeout=10.0)
-        if resp.status_code != 200:
-            return
-
-        cred_data = resp.json().get("data", {})
-        if "oauthTokenData" in cred_data:
-            cred_data["oauthTokenData"]["access_token"] = new_access_token
-
-        await client.patch(
-            url,
-            headers=headers,
-            json={"data": cred_data},
-            timeout=10.0,
+        await update_credential(n8n_credential_id, data)
+    except (N8nApiError, N8nApiKeyMissing) as e:
+        if isinstance(e, N8nApiError) and e.status_code == 403:
+            reason = "n8n API key lacks the credential:update scope — regenerate the n8n API key"
+        else:
+            reason = f"n8n credential update failed: {e}"
+        log.error(
+            "n8n_token_update_failed",
+            connection_id=connection_id, cred_id=n8n_credential_id, error=str(e),
         )
-    except Exception as e:
-        log.warning("n8n_token_update_failed", cred_id=n8n_credential_id, error=str(e))
+        _n8n_sync_errors[connection_id] = reason
+        return False
+    _n8n_sync_errors.pop(connection_id, None)
+    return True
 
 
 # ---------------------------------------------------------------------------
