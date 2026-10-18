@@ -172,3 +172,42 @@ def test_connect_detects_existing_vectors(tmp_path, monkeypatch):
     chromadb_store.disconnect_chromadb()
 
     assert seen == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_retries_failed_slice_singly():
+    """A slice that fails as a batch (encoder out of memory) is retried one
+    vector at a time; a single vector that still fails raises."""
+    from unittest.mock import MagicMock, patch
+
+    from laya.db import chromadb_store
+
+    calls: list[list[str]] = []
+
+    def upsert(ids, documents, metadatas):
+        calls.append(list(ids))
+        if len(ids) > 1 and "bad" in ids:
+            raise RuntimeError("MPS backend out of memory")
+
+    collection = MagicMock()
+    collection.upsert.side_effect = upsert
+    progress: list[tuple[int, int]] = []
+
+    async def on_batch(done, total):
+        progress.append((done, total))
+
+    with patch.object(chromadb_store, "wait_for_collection", return_value=collection):
+        n = await chromadb_store.embed_batch(
+            ["a", "bad", "c", "d"], ["1", "2", "3", "4"], [{}, {}, {}, {}], batch_size=2, on_batch=on_batch,
+        )
+    assert n == 4
+    assert calls == [["a", "bad"], ["a"], ["bad"], ["c", "d"]]
+    assert progress == [(2, 4), (4, 4)]
+
+    def always_fail(ids, documents, metadatas):
+        raise RuntimeError("boom")
+
+    collection.upsert.side_effect = always_fail
+    with patch.object(chromadb_store, "wait_for_collection", return_value=collection):
+        with pytest.raises(RuntimeError):
+            await chromadb_store.embed_batch(["a"], ["1"], [{}], batch_size=4)
