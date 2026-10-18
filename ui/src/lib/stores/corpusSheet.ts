@@ -41,12 +41,9 @@ function nameOf(path: string): string {
  *  dropped when a new drop arrives so the counters describe one batch. */
 function unfinished(items: SheetItem[]): SheetItem[] {
 	const docs = get(documents);
-	return items.filter((it) => {
-		if (it.error) return false;
-		if (!it.documentId) return true;
-		const status = docs.find((d) => d.document_id === it.documentId)?.status;
-		return status !== 'ready' && status !== 'failed';
-	});
+	return items.filter(
+		(it) => !isFinishedItem(it, it.documentId ? docs.find((d) => d.document_id === it.documentId)?.status : undefined)
+	);
 }
 
 export function openCorpusSheetWithFiles(files: File[]): void {
@@ -74,16 +71,20 @@ export function closeCorpusSheet(): void {
 	corpusSheet.update((s) => ({ ...s, open: false }));
 }
 
-/** Drop every finished tile (ready, failed, or rejected by the engine). */
+/** True when a tile has nothing left to wait for: rejected by the engine,
+ *  reached a terminal status, or its document was deleted while in flight
+ *  (``status`` is undefined because the row is gone from the store). */
+export function isFinishedItem(it: SheetItem, status: string | undefined): boolean {
+	if (it.error) return true;
+	if (!it.documentId) return false;
+	return status === undefined || status === 'ready' || status === 'failed';
+}
+
+/** Drop every finished tile. */
 export function clearFinishedSheetItems(getStatus: (documentId: string) => string | undefined): void {
 	corpusSheet.update((s) => ({
 		...s,
-		items: s.items.filter((it) => {
-			if (it.error) return false;
-			if (!it.documentId) return true;
-			const status = getStatus(it.documentId);
-			return status !== 'ready' && status !== 'failed';
-		})
+		items: s.items.filter((it) => !isFinishedItem(it, it.documentId ? getStatus(it.documentId) : undefined))
 	}));
 }
 
@@ -115,7 +116,11 @@ export const corpusActivity = derived(
 				continue;
 			}
 			const doc = it.documentId ? $docs.find((d) => d.document_id === it.documentId) : undefined;
-			if (doc?.status === 'ready') {
+			if (it.documentId && !doc) {
+				// Deleted while in flight: nothing left to wait for.
+				done += 1;
+				sum += 1;
+			} else if (doc?.status === 'ready') {
 				done += 1;
 				sum += 1;
 			} else if (doc?.status === 'failed') {
