@@ -18,7 +18,7 @@ laya/
 |   |   |-- scheduler.py                  # Background scheduler (briefings, housekeeping)
 |   |   |-- http_client.py                # Shared HTTP client
 |   |   |
-|   |   |-- api/                          # HTTP + WebSocket endpoints (27 routers)
+|   |   |-- api/                          # HTTP + WebSocket endpoints (28 routers)
 |   |   |   |-- __init__.py
 |   |   |   |-- events.py                 # POST /events (receives from n8n)
 |   |   |   |-- cards_api.py              # Card CRUD, grouping, archive/reopen, bookmarks
