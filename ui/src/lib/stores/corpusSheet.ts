@@ -6,7 +6,8 @@
 // app-wide drop handler in the root layout, from the Corpus page and from the
 // chat composer.
 
-import { writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
+import { documentProgress, documents } from './documents';
 
 export interface SheetItem {
 	key: string;
@@ -36,17 +37,29 @@ function nameOf(path: string): string {
 	return path.split(/[\\/]/).pop() || path;
 }
 
+/** Tiles still pending or in flight; finished ones from an earlier batch are
+ *  dropped when a new drop arrives so the counters describe one batch. */
+function unfinished(items: SheetItem[]): SheetItem[] {
+	const docs = get(documents);
+	return items.filter((it) => {
+		if (it.error) return false;
+		if (!it.documentId) return true;
+		const status = docs.find((d) => d.document_id === it.documentId)?.status;
+		return status !== 'ready' && status !== 'failed';
+	});
+}
+
 export function openCorpusSheetWithFiles(files: File[]): void {
 	corpusSheet.update((s) => ({
 		open: true,
-		items: [...s.items, ...files.map((file) => ({ key: `f${++seq}`, name: file.name, file }))]
+		items: [...unfinished(s.items), ...files.map((file) => ({ key: `f${++seq}`, name: file.name, file }))]
 	}));
 }
 
 export function openCorpusSheetWithPaths(paths: string[]): void {
 	corpusSheet.update((s) => ({
 		open: true,
-		items: [...s.items, ...paths.map((path) => ({ key: `p${++seq}`, name: nameOf(path), path }))]
+		items: [...unfinished(s.items), ...paths.map((path) => ({ key: `p${++seq}`, name: nameOf(path), path }))]
 	}));
 }
 
@@ -55,9 +68,78 @@ export function openCorpusSheet(): void {
 	corpusSheet.update((s) => ({ ...s, open: true }));
 }
 
+/** Hide the sheet. Items stay so the footer indicator keeps reporting on
+ *  them and reopening shows the same tiles; processing continues on the engine. */
 export function closeCorpusSheet(): void {
-	corpusSheet.set({ open: false, items: [] });
+	corpusSheet.update((s) => ({ ...s, open: false }));
 }
+
+/** Drop every finished tile (ready, failed, or rejected by the engine). */
+export function clearFinishedSheetItems(getStatus: (documentId: string) => string | undefined): void {
+	corpusSheet.update((s) => ({
+		...s,
+		items: s.items.filter((it) => {
+			if (it.error) return false;
+			if (!it.documentId) return true;
+			const status = getStatus(it.documentId);
+			return status !== 'ready' && status !== 'failed';
+		})
+	}));
+}
+
+/** Progress summary of the current batch, for the footer indicator. */
+export interface CorpusActivity {
+	total: number;
+	/** Tiles that reached a terminal state (ready, failed, or rejected). */
+	done: number;
+	failed: number;
+	/** 0..1 across the batch: terminal tiles count as 1, an embedding tile as its batch fraction. */
+	ratio: number;
+	/** Title of the tile currently being worked on, when exactly one is active. */
+	currentTitle: string | null;
+}
+
+export const corpusActivity = derived(
+	[corpusSheet, documents, documentProgress],
+	([$sheet, $docs, $progress]): CorpusActivity => {
+		const total = $sheet.items.length;
+		let done = 0;
+		let failed = 0;
+		let sum = 0;
+		const active: string[] = [];
+		for (const it of $sheet.items) {
+			if (it.error) {
+				done += 1;
+				failed += 1;
+				sum += 1;
+				continue;
+			}
+			const doc = it.documentId ? $docs.find((d) => d.document_id === it.documentId) : undefined;
+			if (doc?.status === 'ready') {
+				done += 1;
+				sum += 1;
+			} else if (doc?.status === 'failed') {
+				done += 1;
+				failed += 1;
+				sum += 1;
+			} else {
+				active.push(doc?.title ?? it.name);
+				const prog = doc ? $progress[doc.document_id] : undefined;
+				if (doc?.status === 'embedding' && prog?.total) sum += 0.4 + 0.5 * ((prog.done ?? 0) / prog.total);
+				else if (doc?.status === 'linking' || doc?.status === 'summarizing') sum += 0.9;
+				else if (doc?.status === 'parsing' || doc?.status === 'chunking') sum += 0.2;
+				else if (doc) sum += 0.1;
+			}
+		}
+		return {
+			total,
+			done,
+			failed,
+			ratio: total ? sum / total : 0,
+			currentTitle: active.length === 1 ? active[0] : null
+		};
+	}
+);
 
 export function updateSheetItem(key: string, patch: Partial<SheetItem>): void {
 	corpusSheet.update((s) => ({
