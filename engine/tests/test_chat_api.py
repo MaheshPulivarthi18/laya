@@ -310,7 +310,7 @@ class TestTitleGenerationBackground:
         return rows[0]["title"]
 
     async def test_truncated_reasoning_does_not_overwrite_title(self, db):
-        """If both attempts come back finish_reason='length', leave 'New Chat' in place.
+        """If the call comes back finish_reason='length', leave 'New Chat' in place.
 
         This is the bug: a Qwen-3/LM-Studio setup was returning reasoning text
         (starting with 'Thinking Process:') whenever the token budget was
@@ -319,32 +319,25 @@ class TestTitleGenerationBackground:
         from laya.pipeline.chat import _generate_title_background
 
         conv_id = await self._make_convo(db)
-        # Both calls (2048 and 4096 budget) truncate.
-        truncated = _title_llm_response("", finish_reason="length")
-        mock = AsyncMock(side_effect=[truncated, truncated])
+        mock = AsyncMock(return_value=_title_llm_response("", finish_reason="length"))
         with patch("laya.pipeline.chat.llm_call", mock):
             await _generate_title_background(conv_id, "help me triage", None)
 
         assert await self._get_title(db, conv_id) == "New Chat"
-        assert mock.await_count == 2
-        # First attempt uses 8192; retry escalates to 16384.
-        assert mock.await_args_list[0].kwargs["max_tokens"] == 8192
-        assert mock.await_args_list[1].kwargs["max_tokens"] == 16384
+        assert mock.await_count == 1
 
-    async def test_retry_succeeds_and_title_is_saved(self, db):
-        """If the first call truncates but the retry returns a clean title, persist it."""
+    async def test_title_uses_default_output_limit(self, db):
+        """The title call passes no max_tokens, so llm_call applies DEFAULT_MAX_TOKENS."""
         from laya.pipeline.chat import _generate_title_background
 
         conv_id = await self._make_convo(db, "conv_title02")
-        mock = AsyncMock(side_effect=[
-            _title_llm_response("", finish_reason="length"),
-            _title_llm_response("Triage Overdue Jira", finish_reason="stop"),
-        ])
+        mock = AsyncMock(return_value=_title_llm_response("Triage Overdue Jira", finish_reason="stop"))
         with patch("laya.pipeline.chat.llm_call", mock):
             await _generate_title_background(conv_id, "help me triage", None)
 
         assert await self._get_title(db, conv_id) == "Triage Overdue Jira"
-        assert mock.await_count == 2
+        assert mock.await_count == 1
+        assert "max_tokens" not in mock.await_args.kwargs
 
     async def test_reasoning_preamble_in_content_is_not_saved(self, db):
         """If the sanitizer sees a reasoning header, drop it rather than persist.

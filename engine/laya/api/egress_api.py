@@ -277,7 +277,6 @@ async def ai_assist(body: AiAssistRequest) -> dict:
                 messages=messages,
                 step="egress_draft",
                 temperature=0.4,
-                max_tokens=65536,
                 tools=tools,
             )
 
@@ -308,7 +307,6 @@ async def ai_assist(body: AiAssistRequest) -> dict:
             messages=messages,
             step="egress_draft",
             temperature=0.4,
-            max_tokens=65536,
             response_schema=schema,
         )
 
