@@ -426,7 +426,11 @@ async def handle_callback(
 
 
 def _token_store(token_data: dict, client_id: str, client_secret: str) -> dict:
-    """Build the keychain entry for an OAuth connection from a token response."""
+    """Build the keychain entry for an OAuth connection from a token response.
+
+    ``user_email`` is the account address from the id_token. It is kept so
+    later n8n credential updates can resend it (see ``_n8n_credential_data``).
+    """
     return {
         "access_token": token_data.get("access_token"),
         "refresh_token": token_data.get("refresh_token"),
@@ -434,6 +438,7 @@ def _token_store(token_data: dict, client_id: str, client_secret: str) -> dict:
         "obtained_at": time.time(),
         "client_id": client_id,
         "client_secret": client_secret,
+        "user_email": _decode_user_email_from_token(token_data),
     }
 
 
@@ -470,11 +475,11 @@ async def _reauthorize_connection(
         synced = await _sync_n8n_credential(
             connection_id,
             n8n_cred_id,
-            {
-                "clientId": client_id,
-                "clientSecret": client_secret or "",
-                "oauthTokenData": _n8n_oauth_token_data(token_data),
-            },
+            _n8n_credential_data(
+                n8n_type, client_id, client_secret,
+                user_email=_decode_user_email_from_token(token_data),
+                token_data=token_data,
+            ),
         )
         if not synced:
             error_message = get_n8n_sync_error(connection_id)
@@ -625,18 +630,18 @@ async def refresh_access_token(connection_id: str, platform: str) -> bool:
         (connection_id,),
     )
     if rows and rows[0]["n8n_credential_id"]:
-        oauth_token_data = _n8n_oauth_token_data({
-            **new_tokens,
-            "refresh_token": token_store["refresh_token"],
-        })
+        user_email = _decode_user_email_from_token(new_tokens) or token_store.get("user_email", "")
+        if user_email and user_email != token_store.get("user_email"):
+            token_store["user_email"] = user_email
+            _store_in_keychain(connection_id, platform, token_store)
         await _sync_n8n_credential(
             connection_id,
             rows[0]["n8n_credential_id"],
-            {
-                "clientId": client_id,
-                "clientSecret": client_secret or "",
-                "oauthTokenData": oauth_token_data,
-            },
+            _n8n_credential_data(
+                provider["n8n_type"], client_id, client_secret,
+                user_email=user_email,
+                token_data={**new_tokens, "refresh_token": token_store["refresh_token"]},
+            ),
         )
 
     log.info("oauth_token_refreshed", platform=platform, connection_id=connection_id)
@@ -653,6 +658,9 @@ async def apply_client_to_connections(platform: str, client_id: str, client_secr
     different client_id are left alone: the provider ties each refresh token to
     the client that issued it, so they keep refreshing with their own client.
     """
+    provider = OAUTH_PROVIDERS.get(platform)
+    if not provider:
+        return
     db = await get_db()
     rows = await db.execute_fetchall(
         "SELECT connection_id, n8n_credential_id FROM egress_connections WHERE platform = ?",
@@ -671,7 +679,10 @@ async def apply_client_to_connections(platform: str, client_id: str, client_secr
             await _sync_n8n_credential(
                 connection_id,
                 row["n8n_credential_id"],
-                {"clientId": client_id, "clientSecret": client_secret or ""},
+                _n8n_credential_data(
+                    provider["n8n_type"], client_id, client_secret,
+                    user_email=token_store.get("user_email", ""),
+                ),
             )
 
 
@@ -723,6 +734,41 @@ def _n8n_oauth_token_data(token_data: dict) -> dict:
     }
 
 
+def _n8n_credential_data(
+    n8n_type: str,
+    client_id: str,
+    client_secret: str,
+    *,
+    user_email: str = "",
+    token_data: dict | None = None,
+) -> dict:
+    """Build the ``data`` body for creating or updating an n8n OAuth credential.
+
+    n8n's public API checks ``data`` against the credential type's full schema
+    on create and on update, including partial updates (``isPartialData``).
+    That schema requires ``serverUrl``, ``sendAdditionalBodyProperties`` and
+    ``additionalBodyProperties`` on every oAuth2Api type, and
+    ``userPrincipalName`` on Outlook, so every request carries them with the
+    values the credential was created with; a request without them is
+    rejected with HTTP 400. ``oauthTokenData`` is included only when
+    ``token_data`` is given, so a client-only update keeps the stored tokens.
+    """
+    data: dict = {
+        "clientId": client_id,
+        # Empty for secretless public clients; n8n only uses it on refresh.
+        "clientSecret": client_secret or "",
+        "serverUrl": "",
+        "sendAdditionalBodyProperties": False,
+        "additionalBodyProperties": "",
+    }
+    if n8n_type == "microsoftOutlookOAuth2Api":
+        data["serverUrl"] = "https://graph.microsoft.com"
+        data["userPrincipalName"] = user_email
+    if token_data is not None:
+        data["oauthTokenData"] = _n8n_oauth_token_data(token_data)
+    return data
+
+
 async def _provision_oauth_to_n8n(
     platform: str,
     n8n_type: str,
@@ -734,27 +780,11 @@ async def _provision_oauth_to_n8n(
     try:
         from laya.integrations.n8n_client import create_credential
 
-        oauth_token_data = _n8n_oauth_token_data(token_data)
-
-        # n8n expects OAuth credentials with specific structure
-        # Base oAuth2Api schema requires serverUrl + additionalBody fields
-        cred_data: dict = {
-            "clientId": client_id,
-            # Empty for secretless public clients; n8n only uses it on refresh.
-            "clientSecret": client_secret or "",
-            "oauthTokenData": oauth_token_data,
-            "serverUrl": "",
-            "sendAdditionalBodyProperties": False,
-            "additionalBodyProperties": "",
-        }
-
-        # Microsoft Outlook/Calendar credentials require additional fields
-        if n8n_type == "microsoftOutlookOAuth2Api":
-            user_email = _decode_user_email_from_token(token_data)
-            cred_data.update({
-                "serverUrl": "https://graph.microsoft.com",
-                "userPrincipalName": user_email,
-            })
+        cred_data = _n8n_credential_data(
+            n8n_type, client_id, client_secret,
+            user_email=_decode_user_email_from_token(token_data),
+            token_data=token_data,
+        )
 
         # Determine n8n node type
         node_type_map = {

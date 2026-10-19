@@ -287,6 +287,30 @@ class TestN8nCredentialSync:
         assert rows[0]["error_message"] == "n8n credential update failed: boom"
 
 
+class TestN8nCredentialData:
+    """n8n validates every credential write, partial updates included, against
+    the type's full schema; these fields must be present or it returns 400."""
+
+    SCHEMA_FIELDS = {"clientId", "clientSecret", "serverUrl",
+                     "sendAdditionalBodyProperties", "additionalBodyProperties"}
+
+    @pytest.mark.parametrize("platform", sorted(oauth.OAUTH_PROVIDERS))
+    def test_every_provider_carries_schema_fields(self, platform):
+        n8n_type = oauth.OAUTH_PROVIDERS[platform]["n8n_type"]
+        data = oauth._n8n_credential_data(n8n_type, "cid", "sec", token_data={"access_token": "a"})
+        assert self.SCHEMA_FIELDS <= data.keys()
+        assert data["oauthTokenData"]["access_token"] == "a"
+        if n8n_type == "microsoftOutlookOAuth2Api":
+            assert "userPrincipalName" in data
+
+    def test_outlook_keeps_graph_url_and_upn(self):
+        data = oauth._n8n_credential_data(
+            "microsoftOutlookOAuth2Api", "cid", "sec", user_email="me@live.in",
+        )
+        assert data["serverUrl"] == "https://graph.microsoft.com"
+        assert data["userPrincipalName"] == "me@live.in"
+
+
 class TestApplyClientToConnections:
     @pytest.mark.asyncio
     async def test_rotated_secret_reaches_keychain_and_n8n(self, db):
@@ -311,7 +335,11 @@ class TestApplyClientToConnections:
             await oauth.apply_client_to_connections("gmail", "cid", "new")
 
         assert store.call_args.args[2]["client_secret"] == "new"
-        assert update.call_args.args == ("cred_9", {"clientId": "cid", "clientSecret": "new"})
+        cred_id, data = update.call_args.args
+        assert cred_id == "cred_9"
+        assert data["clientId"] == "cid" and data["clientSecret"] == "new"
+        # A client-only update leaves the stored tokens in n8n untouched.
+        assert "oauthTokenData" not in data
 
     @pytest.mark.asyncio
     async def test_different_client_id_is_left_alone(self, db):
