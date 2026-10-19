@@ -157,9 +157,10 @@ async def test_llm_call_malformed_json(db):
 # --- Reasoning suppression for structured-output calls ---
 
 
-async def _capture_acompletion_kwargs(*, response_schema, custom_meta):
+async def _capture_acompletion_kwargs(*, response_schema, custom_meta, discovered=None, tools=None):
     """Run llm_call against a fake local provider and return the kwargs passed to
-    litellm.acompletion. custom_meta=None simulates a cloud provider."""
+    litellm.acompletion. custom_meta=None simulates a cloud provider; `discovered` is the
+    DiscoveredModel the provider's model discovery reports for the model (None = not listed)."""
     mock_response = _mock_acompletion_response()
     mock_ac = AsyncMock(return_value=mock_response)
 
@@ -170,14 +171,16 @@ async def _capture_acompletion_kwargs(*, response_schema, custom_meta):
                     "laya.llm.client._resolve_custom_provider",
                     return_value=("openai/qwen3.5-9b", {"api_base": "http://localhost:1234/v1", "api_key": "x"}),
                 ):
-                    with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
-                        with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
-                            await llm_call(
-                                role="router",
-                                messages=[{"role": "user", "content": "test"}],
-                                response_schema=response_schema,
-                                step="route",
-                            )
+                    with patch("laya.llm.client._discovered_model", new_callable=AsyncMock, return_value=discovered):
+                        with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
+                            with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
+                                await llm_call(
+                                    role="router",
+                                    messages=[{"role": "user", "content": "test"}],
+                                    response_schema=response_schema,
+                                    step="route",
+                                    tools=tools,
+                                )
     return mock_ac.call_args.kwargs
 
 
@@ -518,6 +521,98 @@ async def test_no_stop_for_cloud_provider(db):
                         step="route",
                     )
     assert "stop" not in mock_ac.call_args.kwargs
+
+
+# --- Runtimes that reject stop beside a schema or tools (LMStudio Splash) ---
+
+_SPLASH_SCHEMA = {"name": "test", "schema": {"type": "object"}}
+_SPLASH_TOOLS = [{"type": "function", "function": {"name": "t", "parameters": {"type": "object", "properties": {}}}}]
+_LOCAL_META = {**_REASONING_META, "supports_reasoning": False}
+
+
+def _disc(runtime_format):
+    from laya.llm.providers import DiscoveredModel
+
+    return DiscoveredModel(key="lmstudio-local/qwen3.5-9b", display_name="q", runtime_format=runtime_format)
+
+
+@pytest.mark.asyncio
+async def test_no_stop_for_splash_schema_call(db):
+    """Splash answers 400 to stop + response_format, so a schema call omits stop but keeps
+    the repeat penalty, which Splash accepts."""
+    from laya.llm.client import _LOCAL_REPEAT_PENALTY
+
+    kwargs = await _capture_acompletion_kwargs(
+        response_schema=_SPLASH_SCHEMA, custom_meta=_LOCAL_META, discovered=_disc("splash"),
+    )
+    assert "response_format" in kwargs
+    assert "stop" not in kwargs
+    assert kwargs["extra_body"]["repeat_penalty"] == _LOCAL_REPEAT_PENALTY
+
+
+@pytest.mark.asyncio
+async def test_no_stop_for_splash_tool_call(db):
+    """Splash answers 400 to stop + callable tools, so a tool call omits stop."""
+    kwargs = await _capture_acompletion_kwargs(
+        response_schema=None, custom_meta=_LOCAL_META, discovered=_disc("splash"), tools=_SPLASH_TOOLS,
+    )
+    assert "tools" in kwargs
+    assert "stop" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_stop_kept_for_splash_plain_call(db):
+    """A plain text call to Splash (no schema, no tools) is accepted with stop, so it keeps it."""
+    from laya.llm.client import _LOCAL_STOP_SEQUENCES
+
+    kwargs = await _capture_acompletion_kwargs(
+        response_schema=None, custom_meta=_LOCAL_META, discovered=_disc("splash"),
+    )
+    assert kwargs["stop"] == _LOCAL_STOP_SEQUENCES
+
+
+@pytest.mark.asyncio
+async def test_stop_kept_for_mlx_schema_call(db):
+    """Other runtimes keep the stop list on schema calls (the newline-padding guard)."""
+    from laya.llm.client import _LOCAL_STOP_SEQUENCES
+
+    kwargs = await _capture_acompletion_kwargs(
+        response_schema=_SPLASH_SCHEMA, custom_meta=_LOCAL_META, discovered=_disc("mlx"),
+    )
+    assert kwargs["stop"] == _LOCAL_STOP_SEQUENCES
+
+
+@pytest.mark.asyncio
+async def test_stop_kept_for_splash_prompt_text_schema(db):
+    """When the provider is marked without structured-output support the schema goes into
+    the prompt, no response_format is sent, and Splash accepts stop, so it is kept."""
+    from laya.llm.client import _LOCAL_STOP_SEQUENCES
+
+    kwargs = await _capture_acompletion_kwargs(
+        response_schema=_SPLASH_SCHEMA,
+        custom_meta={**_LOCAL_META, "supports_structured_output": False},
+        discovered=_disc("splash"),
+    )
+    assert "response_format" not in kwargs
+    assert kwargs["stop"] == _LOCAL_STOP_SEQUENCES
+
+
+@pytest.mark.asyncio
+async def test_lmstudio_discovery_reads_runtime_format():
+    """LMStudio's /api/v1/models `format` field becomes DiscoveredModel.runtime_format."""
+    from laya.llm.providers import _discover_lmstudio
+
+    resp = MagicMock()
+    resp.json.return_value = {"models": [
+        {"key": "qwen3.6-35b-a3b-splash", "format": "splash", "capabilities": {}},
+        {"key": "qwen/qwen3.6-35b-a3b", "format": "mlx", "capabilities": {}},
+    ]}
+    client = MagicMock()
+    client.get = AsyncMock(return_value=resp)
+    with patch("laya.llm.providers.get_client", return_value=client):
+        with patch("laya.llm.providers._get_provider_api_key", return_value=None):
+            models = await _discover_lmstudio({"id": "lms", "base_url": "http://localhost:1234"})
+    assert [m.runtime_format for m in models] == ["splash", "mlx"]
 
 
 async def _run_local_truncated(content):

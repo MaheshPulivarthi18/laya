@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 import tenacity
@@ -19,6 +19,9 @@ from pydantic import BaseModel
 
 from laya.config import load_settings
 from laya.db.sqlite import get_db
+
+if TYPE_CHECKING:
+    from laya.llm.providers import DiscoveredModel
 
 log = structlog.get_logger()
 
@@ -39,6 +42,12 @@ DEFAULT_MAX_TOKENS = 65536
 # runtime halts the moment one is emitted as text. They never appear inside valid model output,
 # so they're risk-free for well-behaved models. See engine/docs/local-model-newline-padding.md.
 _LOCAL_STOP_SEQUENCES = ["<end_of_turn>", "<eos>", "<|im_end|>", "<|eot_id|>"]
+
+# LMStudio runtime formats (DiscoveredModel.runtime_format) that answer 400 when `stop` is sent
+# together with a response schema or callable tools. Splash generates those under a grammar
+# and refuses stop strings that could cut the result short. The grammar also decides where
+# the output ends, so the padding failure the stop list guards against cannot occur there.
+_RUNTIMES_REJECTING_STOP_WITH_CONSTRAINTS = {"splash"}
 
 # Mild, windowed repetition penalty for structured-output calls on custom providers — breaks the
 # degenerate newline-loop variant (where the terminator is never emitted as text) so the model
@@ -411,9 +420,24 @@ def _estimate_prompt_tokens(messages: list[dict], model: str) -> int:
         return sum(len(str(m.get("content", ""))) for m in messages) // 4
 
 
+async def _discovered_model(original_model: str) -> "DiscoveredModel | None":
+    """The cached discovery entry for a custom-provider model ("{provider_id}/{name}"),
+    or None when the provider is unknown, discovery fails, or the model isn't listed."""
+    try:
+        from laya.llm.providers import discover_models_cached, get_custom_provider
+
+        provider = get_custom_provider(original_model.split("/")[0])
+        if not provider:
+            return None
+        models = await discover_models_cached(provider)
+        return next((m for m in models if m.key == original_model), None)
+    except Exception:
+        return None
+
+
 async def _resolve_max_output_ceiling(
     litellm_model: str,
-    original_model: str,
+    discovered: "DiscoveredModel | None",
     is_custom: bool,
     messages: list[dict],
 ) -> int | None:
@@ -432,24 +456,11 @@ async def _resolve_max_output_ceiling(
 
     # Custom/local providers: cap at (discovered context window − prompt estimate).
     # Populated for LMStudio (native API) and vLLM (max_model_len); None elsewhere.
-    try:
-        from laya.llm.providers import discover_models_cached, get_custom_provider
-
-        provider = get_custom_provider(original_model.split("/")[0])
-        if not provider:
-            return None
-        models = await discover_models_cached(provider)
-        window = next(
-            (m.max_context_length for m in models
-             if m.key == original_model and m.max_context_length),
-            None,
-        )
-        if not window:
-            return None
-        prompt_est = _estimate_prompt_tokens(messages, litellm_model)
-        return max(window - prompt_est - _OUTPUT_MARGIN, _MIN_OUTPUT)
-    except Exception:
+    window = discovered.max_context_length if discovered else None
+    if not window:
         return None
+    prompt_est = _estimate_prompt_tokens(messages, litellm_model)
+    return max(window - prompt_est - _OUTPUT_MARGIN, _MIN_OUTPUT)
 
 
 # ── Current date/time injection ──────────────────────────────────────────
@@ -623,9 +634,10 @@ async def _prepare_call_kwargs(
     # Clamp max_tokens to what this model/server accepts so DEFAULT_MAX_TOKENS
     # never trips a 400 on strict providers and truncation-retry can't overflow
     # the output cap. None ⇒ unknown, so leave as-is (local servers self-clamp).
+    discovered = await _discovered_model(original_model) if custom is not None else None
     max_output_ceiling = await _resolve_max_output_ceiling(
         litellm_model=model,
-        original_model=original_model,
+        discovered=discovered,
         is_custom=custom is not None,
         messages=messages,
     )
@@ -713,7 +725,15 @@ async def _prepare_call_kwargs(
     # providers manage their own stop tokens — scope to custom providers.
     if custom is not None:
         existing_stop = kwargs.get("stop")
-        if existing_stop:
+        runtime_format = discovered.runtime_format if discovered else None
+        if runtime_format in _RUNTIMES_REJECTING_STOP_WITH_CONSTRAINTS and (
+            "response_format" in kwargs or "tools" in kwargs
+        ):
+            # This runtime 400s on any stop list beside a schema or tools, a caller's own
+            # included. A schema sent as prompt text has no response_format, so it keeps stop.
+            kwargs.pop("stop", None)
+            log.debug("llm_stop_omitted_for_runtime", model=model, runtime_format=runtime_format)
+        elif existing_stop:
             extra = existing_stop if isinstance(existing_stop, list) else [existing_stop]
             kwargs["stop"] = [*_LOCAL_STOP_SEQUENCES, *extra]
         else:

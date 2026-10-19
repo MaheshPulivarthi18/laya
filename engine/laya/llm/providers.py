@@ -38,6 +38,9 @@ class DiscoveredModel:
     params_string: str | None = None
     quantization: str | None = None
     loaded: bool = False
+    # Inference engine LMStudio serves the model with ("gguf", "mlx", "splash"); None for
+    # providers that don't report one. Some engines reject request options others accept.
+    runtime_format: str | None = None
 
 
 def get_custom_provider(provider_id: str) -> dict | None:
@@ -208,6 +211,7 @@ async def _discover_lmstudio(provider: dict) -> list[DiscoveredModel]:
                 params_string=m.get("params_string"),
                 quantization=quant.get("name") if quant else None,
                 loaded=len(m.get("loaded_instances", [])) > 0,
+                runtime_format=m.get("format"),
             )
         )
 
