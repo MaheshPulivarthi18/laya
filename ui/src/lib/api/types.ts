@@ -798,6 +798,8 @@ export interface ChatMessage {
 	/** Corpus documents the reply cites as [doc:ID]; absent on older rows. */
 	referenced_documents?: string[];
 	conversation_id?: string;
+	/** Names of the tools the assistant called for this reply, in call order; absent on older rows. */
+	tool_calls?: string[];
 }
 
 /** Chat response from POST /chat */
