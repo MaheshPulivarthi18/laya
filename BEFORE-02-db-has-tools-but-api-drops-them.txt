@@ -1,0 +1,31 @@
+BEFORE (laya main e5f1610): same question, same model
+
+== chat_messages.tool_calls_json in the database (the tools WERE called and saved):
+assistant|msg_5f69adf39597|[{"name": "get_card_stats", "arguments": {"space_id": null}, "result_preview": "{\"total_cards\": 1, \"by_status\": {\"ready\": 1}, \"by_priority\": {\"MEDIUM\": 1}, \"by_category\": {\"OPS\": 1}}"}, {"name": "search_cards", "arguments": {"status": "pending", "limit": 50, "space_id": null}, "result_preview": "{\"groups\": [], \"total_cards\": 0, \"offset\": 0, \"has_more\": false}"}, {"name": "search_cards", "arguments": {"status": "ready", "limit": 50, "space_id": null}, "result_preview": "{\"groups\": [{\"entity_id\": \"laya:briefing:briefing_2026-10-23\", \"entity_title\": \"Daily Briefing - 2026-10-23\", \"platform\": \"laya\", \"matched_cards\": 1, \"total_entity_cards\": 1, \"group_summary\": null, \"c"}]
+user|msg_09e38aac46cf|(none)
+
+== GET /chat/history response (no tool_calls field, so the UI cannot show them):
+[
+    {
+        "message_id": "msg_5f69adf39597",
+        "timestamp": "2026-10-23 17:02:10",
+        "role": "assistant",
+        "content": "You have **1 open card** in total, and it's a daily briefing.\n\n- **Ready (1):** [card:card_ae56e9080c03] \"Daily Briefing - 2026-10-23,\" MEDIUM priority, OPS category, created 2026-10-23 17:01 UTC. Its summary reads \"No significant activity.\"\n- **Pending:** 0\n- **Dismissed, done, or archived:** none in the stats\n\nNothing needs action right now.",
+        "referenced_cards": [
+            "card_ae56e9080c03"
+        ],
+        "referenced_events": [],
+        "referenced_documents": [],
+        "conversation_id": "conv_f5a27836000c"
+    },
+    {
+        "message_id": "msg_09e38aac46cf",
+        "timestamp": "2026-10-23 17:02:06",
+        "role": "user",
+        "content": "Search my cards and give me card stats: what is open right now?",
+        "referenced_cards": [],
+        "referenced_events": [],
+        "referenced_documents": [],
+        "conversation_id": "conv_f5a27836000c"
+    }
+]

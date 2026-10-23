@@ -1,0 +1,20 @@
+[
+  {
+    "message_id": "msg_607f50637ad9",
+    "role": "assistant",
+    "content": "You have **1 open card**. It is a daily briefing with no significant activity.\n\n- [card:card_add02cc542c3] **Daily Briefing - 2026-10-23** (ready, MEDIUM, OPS). Summary: \"No significant activity.\" Source event: [event:evt_briefing_2026-10-23]\n\nThere are no pending, awaiting-input, or agent-running cards. The total card count is also 1, so there are no done, dismissed, or archived cards in the system.",
+    "tool_calls": [
+      "get_card_stats",
+      "search_cards",
+      "search_cards",
+      "search_cards",
+      "search_cards"
+    ]
+  },
+  {
+    "message_id": "msg_b358c5da9309",
+    "role": "user",
+    "content": "Search my cards and give me card stats: what is open right now?",
+    "tool_calls": []
+  }
+]
