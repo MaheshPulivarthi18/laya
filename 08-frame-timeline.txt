@@ -1,0 +1,90 @@
+21:58:02.607  Checking runtimes...
+21:58:02.873  Downloading Python 3.12.13
+21:58:03.151  Node: 3 / 47 MB
+21:58:03.418  Node: 4 / 47 MB
+21:58:03.728  Node: 5 / 47 MB
+21:58:04.024  uv: 0 / 15 MB
+21:58:04.313  Node: 7 / 47 MB
+21:58:04.683  Node: 8 / 47 MB
+21:58:04.962  uv: 1 / 15 MB
+21:58:05.242  Node: 10 / 47 MB
+21:58:05.516  Node: 11 / 47 MB
+21:58:05.798  Node: 11 / 47 MB
+21:58:06.076  Node: 12 / 47 MB
+21:58:06.355  Node: 13 / 47 MB
+21:58:06.631  Node: 14 / 47 MB
+21:58:06.911  Node: 15 / 47 MB
+21:58:07.188  Node: 16 / 47 MB
+21:58:07.459  Node: 17 / 47 MB
+21:58:07.735  Node: 18 / 47 MB
+21:58:08.025  Node: 19 / 47 MB
+21:58:08.292  Node: 20 / 47 MB
+21:58:08.560  Node: 20 / 47 MB
+21:58:08.819  Node: 21 / 47 MB
+21:58:09.084  uv: 2 / 15 MB
+21:58:09.352  Node: 23 / 47 MB
+21:58:09.629  Node: 24 / 47 MB
+21:58:09.893  Node: 25 / 47 MB
+21:58:10.163  Node: 26 / 47 MB
+21:58:10.429  Node: 27 / 47 MB
+21:58:10.696  Node: 28 / 47 MB
+21:58:10.975  Node: 29 / 47 MB
+21:58:11.256  Node: 30 / 47 MB
+21:58:11.525  Node: 30 / 47 MB
+21:58:11.816  Node: 31 / 47 MB
+21:58:12.089  Node: 32 / 47 MB
+21:58:12.358  Node: 33 / 47 MB
+21:58:12.623  Node: 34 / 47 MB
+21:58:12.896  uv: 3 / 15 MB
+21:58:13.162  Node: 36 / 47 MB
+21:58:13.437  Node: 37 / 47 MB
+21:58:13.714  Node: 38 / 47 MB
+21:58:13.985  Node: 39 / 47 MB
+21:58:14.262  Node: 40 / 47 MB
+21:58:14.552  Node: 41 / 47 MB
+21:58:14.829  Node: 42 / 47 MB
+21:58:15.111  Node: 43 / 47 MB
+21:58:15.391  Node: 44 / 47 MB
+21:58:15.666  uv: 4 / 15 MB
+21:58:15.936  Node: 46 / 47 MB
+21:58:16.205  Node: 46 / 47 MB
+21:58:16.478  Verifying Node.js checksum
+21:58:16.739  Verifying Node.js checksum
+21:58:17.018  Python: 5 / 23 MB
+21:58:17.293  uv: 5 / 15 MB
+21:58:17.548  Python: 6 / 23 MB
+21:58:17.810  Python: 6 / 23 MB
+21:58:18.066  Python: 7 / 23 MB
+21:58:18.323  Python: 8 / 23 MB
+21:58:18.577  Python: 9 / 23 MB
+21:58:18.839  Python: 10 / 23 MB
+21:58:19.099  Python: 11 / 23 MB
+21:58:19.382  Python: 12 / 23 MB
+21:58:19.652  Python: 13 / 23 MB
+21:58:19.920  Python: 13 / 23 MB
+21:58:20.179  Python: 14 / 23 MB
+21:58:20.435  Python: 14 / 23 MB
+21:58:20.699  uv: 12 / 15 MB
+21:58:20.962  Python: 16 / 23 MB
+21:58:21.225  Python: 17
+21:58:21.480  Python: 17
+21:58:21.738  uv: 14 / 15 MB
+21:58:21.996  Verifying uv checksum
+21:58:22.298  Python: 19 / 23 MB
+21:58:22.561  Python: 20 / 23 MB
+21:58:22.814  Python: 21 / 23 MB
+21:58:23.070  Python: 23 / 23 MB
+21:58:23.323  Verifying Python checksum
+21:58:23.582  uv 0.7.12 ready
+21:58:23.839  uv 0.7.12 ready
+21:58:24.102  uv 0.7.12 ready
+21:58:24.424  uv 0.7.12 ready
+21:58:24.684  Extracting Python
+21:58:24.951  Extracting Python
+21:58:25.215  Extracting Python
+21:58:25.473  Extracting Python
+21:58:25.731  Extracting Python
+21:58:25.989  Python 3.12.13 ready
+21:58:26.262  Python 3.12.13 ready
+21:58:26.527  Python 3.12.13 ready
+21:58:26.788  Python 3.12.13 found. Checking for Node.js...

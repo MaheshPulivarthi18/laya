@@ -1,0 +1,14 @@
+diff --git a/ui/src-tauri/src/runtime.rs b/ui/src-tauri/src/runtime.rs
+index 1fc9624..1598d9b 100644
+--- a/ui/src-tauri/src/runtime.rs
++++ b/ui/src-tauri/src/runtime.rs
+@@ -162,6 +162,9 @@ pub fn ensure_runtimes<F: FnMut(RuntimeProgress)>(mut on_progress: F) -> Result<
+         None => crate::n8n::find_node_system().is_err(),
+     };
+     let uv_needed = managed_uv().is_none() || !managed_uv_version_matches();
++    // LOCAL TEST ONLY (not committed): pretend no runtime is installed.
++    let force = std::env::var("LAYA_TEST_FORCE_DOWNLOAD").is_ok();
++    let (python_needed, node_needed, uv_needed) = (python_needed || force, node_needed || force, uv_needed || force);
+ 
+     if !python_needed && !node_needed && !uv_needed {
+         on_progress(RuntimeProgress::Done("All runtimes ready".to_string()));

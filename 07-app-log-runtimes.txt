@@ -1,0 +1,6 @@
+[2026-10-23][16:28:00][laya_app_lib::sidecar][INFO] Using system Python 3.13.7 (macosx-15.0-arm64) at /opt/homebrew/bin/python3.13 (via python3.13)
+[2026-10-23][16:28:02][laya_app_lib::sidecar][INFO] Using system Python 3.13.7 (macosx-15.0-arm64) at /opt/homebrew/bin/python3.13 (via python3.13)
+[2026-10-23][16:28:02][laya_app_lib::sidecar][INFO] Using system Python 3.13.7 (macosx-15.0-arm64) at /opt/homebrew/bin/python3.13 (via python3.13)
+[2026-10-23][16:28:21][laya_app_lib::runtime][INFO] Managed Node.js 22.22.3 installed at <fresh-test-home>/.laya/node
+[2026-10-23][16:28:23][laya_app_lib::runtime][INFO] Managed uv 0.7.12 installed at <fresh-test-home>/.laya/uv
+[2026-10-23][16:28:25][laya_app_lib::runtime][INFO] Managed Python 3.12.13 installed at <fresh-test-home>/.laya/python
