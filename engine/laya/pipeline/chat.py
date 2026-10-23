@@ -520,6 +520,7 @@ async def process_chat_message(
         referenced_events=referenced_events,
         referenced_documents=referenced_documents,
         conversation_id=conversation_id,
+        tool_calls=[t["name"] for t in tool_calls_log],
     )
 
     return ChatResponse(
@@ -845,6 +846,7 @@ async def process_chat_message_streaming(
             "referenced_events": referenced_events,
             "referenced_documents": referenced_documents,
             "conversation_id": conversation_id,
+            "tool_calls": [t["name"] for t in tool_calls_log],
         },
     }
 
