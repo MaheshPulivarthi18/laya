@@ -154,7 +154,7 @@ The fastest way to try Laya is a prebuilt release — no toolchains required.
 
 > **macOS:** release builds are signed, so they open normally — just double-click to launch.
 
-Want to build from source, hack on the engine, or contribute? Follow the **Development** setup below.
+Want to build from source, hack on the engine, or contribute? Follow the **Development** setup below and read the [contributing guide](.github/CONTRIBUTING.md) before opening an issue or PR.
 
 ## Development
 
